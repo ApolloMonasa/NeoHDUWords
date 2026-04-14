@@ -9,10 +9,12 @@ import (
 	"math/rand/v2"
 	"net/url"
 	"os"
+	"os/signal"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/chromedp/cdproto/network"
@@ -109,7 +111,9 @@ func runSetPrimaryDirect(reader *bufio.Reader) {
 }
 
 func runCollectDirect(reader *bufio.Reader) {
-	ctx, cancel := context.WithCancel(context.Background())
+	baseCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithCancel(baseCtx)
 	defer cancel()
 
 	dbPath, _ := readLine(reader, "数据库路径 [hduwords.db]")
@@ -190,8 +194,6 @@ func runCollectDirect(reader *bufio.Reader) {
 	collectLog("INFO", "进入收集模式：workers=%d tokenPool=%d cooldown=%v submitRetries=%d retryInterval=%v", workerCount, len(workerURLs), cooldownStr, retryCfg.MaxRetries, retryCfg.Interval)
 
 	var wg sync.WaitGroup
-	ctx, cancel = context.WithCancel(context.Background())
-	defer cancel()
 	for i := 0; i < workerCount; i++ {
 		workerTag := fmt.Sprintf("w%02d", i+1)
 		workerURL := workerURLs[i]
@@ -206,9 +208,10 @@ func runCollectDirect(reader *bufio.Reader) {
 			runCollectLoop(ctx, tag, cl, st, paperType, mustDuration(cooldownStr, 5*time.Minute), retryCfg)
 		}(workerTag, workerURL)
 	}
-	fmt.Println("按 Ctrl+C 退出")
+	fmt.Println("按 Ctrl+C 返回主菜单")
 	<-ctx.Done()
 	wg.Wait()
+	fmt.Println("收集已停止，返回主菜单")
 }
 
 func runTestDirect(reader *bufio.Reader) {

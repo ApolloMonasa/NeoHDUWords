@@ -60,6 +60,24 @@ go build -o tui.exe ./cmd/tui
 
 TUI 发现更新时会优先下载并安装对应平台的 Release 二进制；若当前 Release 缺少匹配资产，会提示用户无法自动更新。
 
+### 5. CLI 自更新
+
+```bash
+./cli.exe update
+```
+
+只检查不安装：
+
+```bash
+./cli.exe update --check-only
+```
+
+跳过确认直接安装：
+
+```bash
+./cli.exe update --yes
+```
+
 ## 三、账号与 Token 池
 
 ### 主账号与池账号规则

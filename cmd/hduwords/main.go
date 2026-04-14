@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,7 +10,9 @@ import (
 	"log"
 	"math/rand/v2"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -18,10 +21,12 @@ import (
 
 	"hduwords/internal/sklclient"
 	"hduwords/internal/store"
+	"hduwords/internal/updatecheck"
 )
 
 const defaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 const examMobileUserAgent = "Mozilla/5.0 (Linux; Android 13; M2102J2SC Build/TKQ1.221114.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.0.0 Mobile Safari/537.36"
+const defaultUpdateRepo = "ApolloMonasa/NeoHDUWords"
 
 func main() {
 	log.SetFlags(0)
@@ -49,6 +54,10 @@ func main() {
 		runCmd("exam", os.Args[2:])
 	case "db":
 		dbCmd(os.Args[2:])
+	case "update":
+		updateCmd(os.Args[2:])
+	case "apply-update":
+		applyUpdateCmd(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -67,6 +76,7 @@ Usage:
 	hduwords collect [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--ua <ua>] [--cooldown 5m] [--pool-file .tokens] [--workers 0] [--submit-retries 3] [--submit-retry-interval 10s]
 	hduwords test    [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--ua <ua>] [--dry-run] [--unknown-policy abort|skip|random] [--submit-retries 3] [--submit-retry-interval 10s]
 	hduwords exam    [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--time 30s] [--score 100] [--dry-run] [--submit-retries 3] [--submit-retry-interval 10s]
+	hduwords update  [--repo owner/name] [--updates-dir .updates] [--yes] [--check-only]
 	hduwords db stats --db <path>
 	hduwords db export --db <path> [--format json|markdown] [--out <file>]
 
@@ -78,6 +88,7 @@ Commands:
 	collect    收集题库：支持 token 池并发采集；收集与练习统一使用 type=0
 	test       练习答题测试：基于本地题库进行练习(type=0)作答
 	exam       正式自动考试：基于本地题库进行正式考试作答
+	update     检查并安装最新 CLI 发行版（二进制更新）
 	db stats    查看本地题库统计信息（题目数、答案数、冲突数）
 	db export   导出完整题库（包含题干、选项、正确答案），可用于还原官方题库
 	db markdown, export-md, md 导出题库为 markdown 格式
@@ -102,7 +113,180 @@ Options:
 		--cooldown           每轮冷却时间，默认 5m
 		--pool-file          token 池文件，默认 .tokens
 		--workers            并发 worker 数，默认自动
+
+	Update only:
+		--repo               发布仓库，默认 ApolloMonasa/NeoHDUWords
+		--updates-dir        更新包下载目录，默认 .updates
+		--yes                跳过确认，直接安装
+		--check-only         只检查是否有更新，不安装
 `)
+}
+
+func updateCmd(args []string) {
+	fs := flag.NewFlagSet("update", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	repoFlag := fs.String("repo", defaultUpdateRepo, "github repo owner/name")
+	updatesDirFlag := fs.String("updates-dir", ".updates", "download directory for update archives")
+	yesFlag := fs.Bool("yes", false, "auto confirm install")
+	checkOnlyFlag := fs.Bool("check-only", false, "only check for updates")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+
+	repo, err := updatecheck.ParseRepo(*repoFlag)
+	if err != nil {
+		fatalErr(err)
+	}
+
+	startDir, err := os.Getwd()
+	if err != nil {
+		fatalErr(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	status, err := updatecheck.Check(ctx, repo, startDir)
+	if err != nil {
+		fatalErr(err)
+	}
+
+	showUpdateStatusCLI(status)
+	if !status.Available {
+		fmt.Println("已是最新版本")
+		return
+	}
+	if *checkOnlyFlag {
+		fmt.Println("检测到有更新（check-only）")
+		return
+	}
+
+	if !*yesFlag && !promptYesNoCLI("检测到更新，是否下载并安装？", false) {
+		fmt.Println("已取消更新")
+		return
+	}
+
+	releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	release, err := updatecheck.LatestRelease(releaseCtx, repo)
+	releaseCancel()
+	if err != nil {
+		fatalErr(err)
+	}
+
+	asset, ok := release.AssetForCurrentPlatform("cli")
+	if !ok {
+		fatalf("最新发行版 %s 没有匹配当前平台的 cli 资产", release.TagName)
+	}
+
+	downloadDir := strings.TrimSpace(*updatesDirFlag)
+	if downloadDir == "" {
+		downloadDir = ".updates"
+	}
+	if err := os.MkdirAll(downloadDir, 0o755); err != nil {
+		fatalErr(err)
+	}
+
+	dest := filepath.Join(downloadDir, asset.Name)
+	written, err := updatecheck.DownloadAsset(context.Background(), asset, dest)
+	if err != nil {
+		fatalErr(err)
+	}
+	fmt.Printf("更新包已下载：%s (%d bytes)\n", dest, written)
+
+	if err := installSelfUpdateCLI(dest); err != nil {
+		fatalErr(err)
+	}
+	fmt.Println("更新已启动安装，程序将退出。")
+}
+
+func applyUpdateCmd(args []string) {
+	fs := flag.NewFlagSet("apply-update", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	sourcePath := fs.String("source", "", "downloaded update source path")
+	targetPath := fs.String("target", "", "target executable path")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+	if strings.TrimSpace(*sourcePath) == "" || strings.TrimSpace(*targetPath) == "" {
+		fatalf("apply-update 需要 --source 和 --target")
+	}
+	if err := updatecheck.InstallBinary(*sourcePath, *targetPath); err != nil {
+		fatalErr(err)
+	}
+}
+
+func installSelfUpdateCLI(sourcePath string) error {
+	selfExe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	helperDir, err := os.MkdirTemp("", "hduwords-updater-*")
+	if err != nil {
+		return err
+	}
+	helperPath := filepath.Join(helperDir, filepath.Base(selfExe))
+	if err := copyLocalFileCLI(selfExe, helperPath); err != nil {
+		return err
+	}
+	cmd := exec.Command(helperPath, "apply-update", "--source", sourcePath, "--target", selfExe)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Start()
+}
+
+func copyLocalFileCLI(srcPath, dstPath string) error {
+	input, err := os.ReadFile(srcPath)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dstPath, input, 0o755)
+}
+
+func promptYesNoCLI(prompt string, defaultYes bool) bool {
+	defaultLabel := "y/N"
+	if defaultYes {
+		defaultLabel = "Y/n"
+	}
+	fmt.Printf("%s [%s]: ", prompt, defaultLabel)
+	reader := bufio.NewReader(os.Stdin)
+	line, _ := reader.ReadString('\n')
+	line = strings.ToLower(strings.TrimSpace(line))
+	if line == "" {
+		return defaultYes
+	}
+	return line == "y" || line == "yes" || line == "1" || line == "true"
+}
+
+func showUpdateStatusCLI(status updatecheck.Status) {
+	if status.LocalVersion != "" {
+		if status.LocalSHA != "" {
+			fmt.Printf("当前版本：%s (%s)\n", status.LocalVersion, shortSHACLI(status.LocalSHA))
+		} else {
+			fmt.Printf("当前版本：%s\n", status.LocalVersion)
+		}
+	} else if status.LocalSHA == "" {
+		fmt.Println("当前版本：无法读取本地 Git 信息")
+	} else {
+		fmt.Printf("当前版本：%s (%s)\n", shortSHACLI(status.LocalSHA), status.LocalBranch)
+	}
+	if status.RemoteSHA == "" {
+		fmt.Println("远端版本：无法获取")
+		return
+	}
+	fmt.Printf("远端版本：%s (%s)\n", shortSHACLI(status.RemoteSHA), status.RemoteBranch)
+	if status.Available {
+		fmt.Println("状态：有更新")
+	} else {
+		fmt.Println("状态：已是最新")
+	}
+}
+
+func shortSHACLI(sha string) string {
+	sha = strings.TrimSpace(sha)
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }
 
 func runCmd(cmdName string, args []string) {
