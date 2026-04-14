@@ -2,8 +2,7 @@
 >本项目源自作者对新我爱记单词网站Auth机制的探索，当前该工具维护测试网站是可行的，用于其他场景不保证没有bug，若有，可开Issue或邮箱联系。
 
 这是当前发布的 CLI + TUI 双入口版本，用于自动化执行“我爱记单词”答题链路，并把官方正确答案沉淀到本地 SQLite 题库。TUI 已经拆成独立程序，可以双击进入黑窗口，不再和 CLI 混在一起。
-
-当前版本目标：CLI 与 TUI 功能等价。TUI 的交互表单已覆盖 CLI 主要参数（如 rate/timeout/unknown-policy/submit-retries/submit-retry-interval 等）。
+CLI 与 TUI 功能等价。TUI 的交互表单已覆盖 CLI 主要参数（如 rate/timeout/unknown-policy/submit-retries/submit-retry-interval 等）。
 
 > 免责声明：本工具仅用于经授权的测试、验收与回归场景。禁止用于未授权环境。
 
