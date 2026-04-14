@@ -345,7 +345,14 @@ func runCmd(cmdName string, args []string) {
 		collectLog("INFO", "exam 参数: time=%v score=%d", *examTime, *examScore)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	contextTimeout := 5 * time.Minute
+	if cmdName == "exam" {
+		contextTimeout = *examTime + 15*time.Minute
+		if contextTimeout < 20*time.Minute {
+			contextTimeout = 20 * time.Minute
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 	defer cancel()
 
 	st, err := store.Open(*dbPath)
@@ -517,8 +524,8 @@ func runCmd(cmdName string, args []string) {
 		}
 
 		if cmdName == "exam" && *examTime > 0 {
-			collectLog("INFO", "exam 模式等待 %v 后交卷", *examTime)
-			if err := waitWithContext(ctx, *examTime); err != nil {
+			collectLog("INFO", "exam 模式进度条等待 %v 后交卷", *examTime)
+			if err := waitWithProgressBar(ctx, *examTime, "等待交卷"); err != nil {
 				fatalErr(err)
 			}
 		}
@@ -967,6 +974,54 @@ func waitWithContext(ctx context.Context, d time.Duration) error {
 	case <-timer.C:
 		return nil
 	}
+}
+
+func waitWithProgressBar(ctx context.Context, d time.Duration, label string) error {
+	if d <= 0 {
+		return nil
+	}
+	deadline := time.Now().Add(d)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	renderProgressBar(label, d, d)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			fmt.Println()
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			fmt.Print("\n")
+			return ctx.Err()
+		case <-ticker.C:
+			elapsed := d - remaining
+			renderProgressBar(label, elapsed, d)
+		}
+	}
+}
+
+func renderProgressBar(label string, elapsed, total time.Duration) {
+	if total <= 0 {
+		total = time.Second
+	}
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	if elapsed > total {
+		elapsed = total
+	}
+	const barWidth = 24
+	filled := int(float64(barWidth) * float64(elapsed) / float64(total))
+	if filled > barWidth {
+		filled = barWidth
+	}
+	percent := int(float64(elapsed) * 100 / float64(total))
+	if percent > 100 {
+		percent = 100
+	}
+	bar := strings.Repeat("#", filled) + strings.Repeat("-", barWidth-filled)
+	fmt.Printf("\r\x1b[2K%s [%s] %3d%%", label, bar, percent)
 }
 
 func upsertCollectedAnswers(ctx context.Context, st *store.Store, res sklclient.PaperDetail) (int, int, int, error) {

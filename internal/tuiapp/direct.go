@@ -236,6 +236,7 @@ func runExamLikeDirect(reader *bufio.Reader, examMode bool) {
 	if strings.TrimSpace(timeWait) == "" {
 		timeWait = "30s"
 	}
+	waitBeforeSubmit := mustDuration(timeWait, 30*time.Second)
 	scoreStr, _ := readLine(reader, "目标得分百分比 [-1]")
 	if strings.TrimSpace(scoreStr) == "" {
 		scoreStr = "-1"
@@ -280,7 +281,14 @@ func runExamLikeDirect(reader *bufio.Reader, examMode bool) {
 	submitRetries, _ := strconv.Atoi(strings.TrimSpace(submitRetriesStr))
 	retryCfg := submitRetryConfig{MaxRetries: submitRetries, Interval: mustDuration(submitRetryIntStr, 10*time.Second)}.normalized()
 
-	reqCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	contextTimeout := 5 * time.Minute
+	if examMode {
+		contextTimeout = waitBeforeSubmit + 15*time.Minute
+		if contextTimeout < 20*time.Minute {
+			contextTimeout = 20 * time.Minute
+		}
+	}
+	reqCtx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 	defer cancel()
 
 	st, err := store.Open(dbPath)
@@ -302,7 +310,7 @@ func runExamLikeDirect(reader *bufio.Reader, examMode bool) {
 		return
 	}
 
-	runPaperFlow(reqCtx, st, cl, paperType, mustDuration(timeWait, 30*time.Second), score, dryRun, policy, examMode, retryCfg)
+	runPaperFlow(reqCtx, st, cl, paperType, waitBeforeSubmit, score, dryRun, policy, examMode, retryCfg)
 }
 
 func runPaperFlow(ctx context.Context, st *store.Store, cl *sklclient.Client, paperType int, waitBeforeSubmit time.Duration, targetScore int, dryRun bool, policy unknownPolicy, examMode bool, retryCfg submitRetryConfig) {
@@ -452,8 +460,8 @@ func runPaperFlow(ctx context.Context, st *store.Store, cl *sklclient.Client, pa
 			return
 		}
 		if examMode && waitBeforeSubmit > 0 {
-			fmt.Printf("等待 %v 后交卷...\n", waitBeforeSubmit)
-			if err := waitWithContext(ctx, waitBeforeSubmit); err != nil {
+			fmt.Printf("等待交卷：%v\n", waitBeforeSubmit)
+			if err := waitWithProgressBar(ctx, waitBeforeSubmit, "等待交卷"); err != nil {
 				fmt.Printf("等待被中断：%v\n", err)
 				return
 			}
@@ -860,6 +868,54 @@ func waitWithContext(ctx context.Context, d time.Duration) error {
 	case <-timer.C:
 		return nil
 	}
+}
+
+func waitWithProgressBar(ctx context.Context, d time.Duration, label string) error {
+	if d <= 0 {
+		return nil
+	}
+	deadline := time.Now().Add(d)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	renderProgressBar(label, d, d)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			fmt.Println()
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			fmt.Print("\n")
+			return ctx.Err()
+		case <-ticker.C:
+			elapsed := d - remaining
+			renderProgressBar(label, elapsed, d)
+		}
+	}
+}
+
+func renderProgressBar(label string, elapsed, total time.Duration) {
+	if total <= 0 {
+		total = time.Second
+	}
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	if elapsed > total {
+		elapsed = total
+	}
+	const barWidth = 24
+	filled := int(float64(barWidth) * float64(elapsed) / float64(total))
+	if filled > barWidth {
+		filled = barWidth
+	}
+	percent := int(float64(elapsed) * 100 / float64(total))
+	if percent > 100 {
+		percent = 100
+	}
+	bar := strings.Repeat("#", filled) + strings.Repeat("-", barWidth-filled)
+	fmt.Printf("\r\x1b[2K%s [%s] %3d%%", label, bar, percent)
 }
 
 func upsertCollectedAnswers(ctx context.Context, st *store.Store, res sklclient.PaperDetail) (int, int, int, error) {
