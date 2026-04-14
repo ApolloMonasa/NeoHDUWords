@@ -1,0 +1,72 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: go build -trimpath -ldflags "-s -w -X hduwords/internal/buildinfo.Version=dev -X hduwords/internal/buildinfo.Commit=${{ github.sha }}" -o cli.exe ./cmd/hduwords
+
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-windows
+          path: cli.exe
+
+      - name: Build TUI (Windows)
+        if: runner.os == 'Windows'
+        run: go build -trimpath -ldflags "-s -w -X hduwords/internal/buildinfo.Version=dev -X hduwords/internal/buildinfo.Commit=${{ github.sha }}" -o tui.exe ./cmd/tui
+
+      - name: Upload TUI artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tui-windows
+          path: tui.exe
+
+      - name: Build (Unix)
+        if: runner.os != 'Windows'
+        run: go build -trimpath -ldflags "-s -w -X hduwords/internal/buildinfo.Version=dev -X hduwords/internal/buildinfo.Commit=${{ github.sha }}" -o cli ./cmd/hduwords
+
+      - name: Upload artifact (Unix)
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-unix
+          path: cli
+
+      - name: Build TUI (Unix)
+        if: runner.os != 'Windows'
+        run: go build -trimpath -ldflags "-s -w -X hduwords/internal/buildinfo.Version=dev -X hduwords/internal/buildinfo.Commit=${{ github.sha }}" -o tui ./cmd/tui
+
+      - name: Upload TUI artifact (Unix)
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tui-unix
+          path: tui

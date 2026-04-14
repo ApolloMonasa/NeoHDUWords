@@ -1,0 +1,8 @@
+.\trae
+*.db
+*.db-wal
+*.db-shm
+*.exe
+*.exe~
+.token
+.tokens

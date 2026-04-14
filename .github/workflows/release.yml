@@ -1,0 +1,58 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Prepare dist
+        run: mkdir dist
+
+      - name: Build Linux CLI
+        env:
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -trimpath -ldflags "-s -w -X hduwords/internal/buildinfo.Version=${{ github.ref_name }} -X hduwords/internal/buildinfo.Commit=${{ github.sha }}" -o dist/cli-linux-amd64 ./cmd/hduwords
+
+      - name: Build Linux TUI
+        env:
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -trimpath -ldflags "-s -w -X hduwords/internal/buildinfo.Version=${{ github.ref_name }} -X hduwords/internal/buildinfo.Commit=${{ github.sha }}" -o dist/tui-linux-amd64 ./cmd/tui
+
+      - name: Build Windows CLI
+        env:
+          GOOS: windows
+          GOARCH: amd64
+        run: go build -trimpath -ldflags "-s -w -X hduwords/internal/buildinfo.Version=${{ github.ref_name }} -X hduwords/internal/buildinfo.Commit=${{ github.sha }}" -o dist/cli-windows-amd64.exe ./cmd/hduwords
+
+      - name: Build Windows TUI
+        env:
+          GOOS: windows
+          GOARCH: amd64
+        run: go build -trimpath -ldflags "-s -w -X hduwords/internal/buildinfo.Version=${{ github.ref_name }} -X hduwords/internal/buildinfo.Commit=${{ github.sha }}" -o dist/tui-windows-amd64.exe ./cmd/tui
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/cli-linux-amd64
+            dist/tui-linux-amd64
+            dist/cli-windows-amd64.exe
+            dist/tui-windows-amd64.exe
