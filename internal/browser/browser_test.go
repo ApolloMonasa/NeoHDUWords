@@ -1,6 +1,8 @@
 package browser
 
 import (
+	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -94,14 +96,25 @@ func TestPathExists(t *testing.T) {
 	if pathExists("") {
 		t.Error("empty path should return false")
 	}
-	if !pathExists("/") {
-		t.Error("root path should exist")
+	root := "/"
+	if runtime.GOOS == "windows" {
+		root = os.Getenv("SystemRoot")
+		if root == "" {
+			root = `C:\`
+		}
+	}
+	if !pathExists(root) {
+		t.Errorf("%q should exist", root)
 	}
 }
 
 func TestIsFullPath(t *testing.T) {
-	if !isFullPath("/usr/bin/chromium") {
-		t.Error("/usr/bin/chromium should be a full path")
+	fullPath := "/usr/bin/chromium"
+	if runtime.GOOS == "windows" {
+		fullPath = `C:\Program Files\chromium.exe`
+	}
+	if !isFullPath(fullPath) {
+		t.Errorf("%q should be a full path", fullPath)
 	}
 	if isFullPath("chromium") {
 		t.Error("'chromium' should not be a full path")
