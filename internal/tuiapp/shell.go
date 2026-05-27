@@ -167,10 +167,9 @@ func menuLoop(reader *bufio.Reader) {
 		fmt.Println("主菜单")
 		fmt.Println("  1. 登录")
 		fmt.Println("  2. 收集")
-		fmt.Println("  3. 测试")
-		fmt.Println("  4. 考试")
-		fmt.Println("  5. 数据库")
-		fmt.Println("  6. 账号管理")
+		fmt.Println("  3. 考试")
+		fmt.Println("  4. 数据库")
+		fmt.Println("  5. 账号管理")
 		fmt.Println("  0. 退出")
 		choice, _ := readLine(reader, "请选择")
 		switch strings.TrimSpace(choice) {
@@ -179,12 +178,10 @@ func menuLoop(reader *bufio.Reader) {
 		case "2":
 			runCollectDirect(reader)
 		case "3":
-			runTestDirect(reader)
-		case "4":
 			runExamDirect(reader)
-		case "5":
+		case "4":
 			runDatabaseWizard(reader)
-		case "6":
+		case "5":
 			runTokenWizard(reader)
 		case "0", "q", "quit", "exit":
 			return

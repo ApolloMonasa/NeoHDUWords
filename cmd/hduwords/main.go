@@ -48,10 +48,8 @@ func main() {
 		setPrimaryCmd(os.Args[2:])
 	case "collect":
 		collectCmd(os.Args[2:])
-	case "test":
-		runCmd("test", os.Args[2:])
 	case "exam":
-		runCmd("exam", os.Args[2:])
+		runExamCmd(os.Args[2:])
 	case "db":
 		dbCmd(os.Args[2:])
 	case "update":
@@ -69,12 +67,11 @@ func usage() {
 	fmt.Fprint(os.Stderr, `cli - HDU 我爱记单词 CLI
 
 Usage:
-	hduwords login
-	hduwords addtoken
+	hduwords login    [--browser chrome|edge]
+	hduwords addtoken [--browser chrome|edge]
 	hduwords listtokens [--pool-file .tokens] [--show-plain]
 	hduwords setprimary [--token <token>] [--pool-file .tokens] [--sync-login=true]
 	hduwords collect [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--ua <ua>] [--cooldown 5m] [--pool-file .tokens] [--workers 0] [--submit-retries 3] [--submit-retry-interval 10s]
-	hduwords test    [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--ua <ua>] [--dry-run] [--unknown-policy abort|skip|random] [--submit-retries 3] [--submit-retry-interval 10s]
 	hduwords exam    [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--time 30s] [--score 100] [--dry-run] [--submit-retries 3] [--submit-retry-interval 10s]
 	hduwords update  [--repo owner/name] [--updates-dir .updates] [--yes] [--check-only]
 	hduwords db stats --db <path>
@@ -84,9 +81,8 @@ Commands:
 	login      自动打开浏览器，完成统一身份认证后后台自动捕获 Token 并保存至本地
 	addtoken   自动打开浏览器，登录后将 token 追加写入 .tokens（用于 collect 多账号并发）
 	listtokens 查看 .token 与 .tokens 的账号列表及 primary 标识
-	setprimary 设置 .tokens 的 primary 标识；默认同步到 .token 供 exam/test 使用
+	setprimary 设置 .tokens 的 primary 标识；默认同步到 .token 供 exam 使用
 	collect    收集题库：支持 token 池并发采集；收集与练习统一使用 type=0
-	test       练习答题测试：基于本地题库进行练习(type=0)作答
 	exam       正式自动考试：基于本地题库进行正式考试作答
 	update     检查并安装最新 CLI 发行版（二进制更新）
 	db stats    查看本地题库统计信息（题目数、答案数、冲突数）
@@ -94,6 +90,9 @@ Commands:
 	db markdown, export-md, md 导出题库为 markdown 格式
 
 Options:
+	Login:
+		--browser            浏览器种类: chrome|edge（留空自动检测，优先级 Chrome→Edge）
+
 	Common:
 		--url                如不提供，则默认从 'hduwords login' 生成的本地 .token 文件中读取。也可手动提供带有 token 的网址
 		--db                 数据库路径，默认 hduwords.db
@@ -105,7 +104,6 @@ Options:
 		--time               交卷前等待时长，默认 0s
 		--score              目标得分百分比，默认 -1（不启用）
 		--dry-run            只演练不提交
-		--unknown-policy     未知题处理：abort|skip|random（exam 会强制 random）
 		--submit-retries     提交 403 重试次数，默认 3
 		--submit-retry-interval 提交 403 重试间隔，默认 10s
 
@@ -289,14 +287,9 @@ func shortSHACLI(sha string) string {
 	return sha
 }
 
-func runCmd(cmdName string, args []string) {
-	fs := flag.NewFlagSet(cmdName, flag.ContinueOnError)
+func runExamCmd(args []string) {
+	fs := flag.NewFlagSet("exam", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-
-	paperType := 0
-	if cmdName == "exam" {
-		paperType = 1
-	}
 
 	var (
 		rawURL         = fs.String("url", "", "token url")
@@ -304,10 +297,10 @@ func runCmd(cmdName string, args []string) {
 		rate           = fs.Float64("rate", 2, "max requests per second")
 		timeout        = fs.Duration("timeout", 15*time.Second, "http timeout")
 		ua             = fs.String("ua", defaultUserAgent, "user-agent")
-		examTime       = fs.Duration("time", 0, "exam only: wait before submitting")
-		examScore      = fs.Int("score", -1, "exam only: target score percentage 0-100")
+		examTime       = fs.Duration("time", 0, "wait before submitting")
+		examScore      = fs.Int("score", -1, "target score percentage 0-100")
 		dryRun         = fs.Bool("dry-run", false, "print decisions without submitting")
-		unknownPolicy  = fs.String("unknown-policy", "abort", "abort|skip|random")
+		unknownPolicy  = fs.String("unknown-policy", "random", "abort|skip|random")
 		submitRetries  = fs.Int("submit-retries", 3, "retry count for 403 on save/submit before creating new paper")
 		submitRetryInt = fs.Duration("submit-retry-interval", 10*time.Second, "wait duration between 403 retries on save/submit")
 	)
@@ -315,18 +308,9 @@ func runCmd(cmdName string, args []string) {
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
-	uaFlagProvided := false
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "ua" {
-			uaFlagProvided = true
-		}
-	})
-	if cmdName == "exam" {
-		if uaFlagProvided {
-			collectLog("WARN", "exam 模式强制使用移动端 UA (忽略 --ua)")
-		}
-		*ua = examMobileUserAgent
-	}
+
+	paperType := 1
+	*ua = examMobileUserAgent
 
 	finalURL := getFinalTokenURL(*rawURL)
 
@@ -334,23 +318,18 @@ func runCmd(cmdName string, args []string) {
 	if err != nil {
 		fatalErr(err)
 	}
-	if cmdName == "exam" && policy != unknownRandom {
+	if policy != unknownRandom {
 		collectLog("WARN", "exam 模式未知题策略强制 random (忽略 --unknown-policy=%s)", *unknownPolicy)
 		policy = unknownRandom
 	}
 	retryCfg := submitRetryConfig{MaxRetries: *submitRetries, Interval: *submitRetryInt}.normalized()
 
-	collectLog("INFO", "%s 模式启动: type=%d db=%s dryRun=%v submitRetries=%d retryInterval=%v", cmdName, paperType, *dbPath, *dryRun, retryCfg.MaxRetries, retryCfg.Interval)
-	if cmdName == "exam" {
-		collectLog("INFO", "exam 参数: time=%v score=%d", *examTime, *examScore)
-	}
+	collectLog("INFO", "exam 模式启动: type=%d db=%s dryRun=%v submitRetries=%d retryInterval=%v", paperType, *dbPath, *dryRun, retryCfg.MaxRetries, retryCfg.Interval)
+	collectLog("INFO", "exam 参数: time=%v score=%d", *examTime, *examScore)
 
-	contextTimeout := 5 * time.Minute
-	if cmdName == "exam" {
-		contextTimeout = *examTime + 15*time.Minute
-		if contextTimeout < 20*time.Minute {
-			contextTimeout = 20 * time.Minute
-		}
+	contextTimeout := *examTime + 15*time.Minute
+	if contextTimeout < 20*time.Minute {
+		contextTimeout = 20 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 	defer cancel()
@@ -377,18 +356,10 @@ func runCmd(cmdName string, args []string) {
 			paper = *retryPaper
 			retryPaper = nil
 		} else {
-			if cmdName == "exam" {
-				paper, err = cl.CreateExamPaper(ctx, paperType)
-			} else {
-				paper, err = cl.GetOrCreateActivePaper(ctx, paperType)
-			}
+			paper, err = cl.CreateExamPaper(ctx, paperType)
 		}
 		if err != nil {
-			if cmdName == "exam" {
-				fatalErr(fmt.Errorf("CreateExamPaper(exam): %w", err))
-			} else {
-				fatalErr(err)
-			}
+			fatalErr(fmt.Errorf("CreateExamPaper(exam): %w", err))
 		}
 
 		detail, err := cl.PaperDetail(ctx, paper.PaperID)
@@ -408,7 +379,7 @@ func runCmd(cmdName string, args []string) {
 
 		targetCorrect := -1
 		correctAssigned := 0
-		if cmdName == "exam" && *examScore >= 0 {
+		if *examScore >= 0 {
 			if *examScore > 100 {
 				fatalf("--score must be between 0 and 100")
 			}
@@ -430,7 +401,7 @@ func runCmd(cmdName string, args []string) {
 			if err != nil {
 				fatalErr(err)
 			}
-			if cmdName == "exam" && *examScore >= 0 {
+			if *examScore >= 0 {
 				useCorrect := ok && correctAssigned < targetCorrect
 				if useCorrect {
 					idx := -1
@@ -512,7 +483,7 @@ func runCmd(cmdName string, args []string) {
 			}
 		}
 
-		if cmdName == "exam" && *examScore >= 0 {
+		if *examScore >= 0 {
 			collectLog("INFO", "exam 评分控制: 已保留正确=%d 目标正确=%d 总题=%d", correctAssigned, targetCorrect, len(detail.List))
 		}
 
@@ -523,7 +494,7 @@ func runCmd(cmdName string, args []string) {
 			return
 		}
 
-		if cmdName == "exam" && *examTime > 0 {
+		if *examTime > 0 {
 			collectLog("INFO", "exam 模式进度条等待 %v 后交卷", *examTime)
 			if err := waitWithProgressBar(ctx, *examTime, "等待交卷"); err != nil {
 				fatalErr(err)
@@ -569,21 +540,17 @@ func runCmd(cmdName string, args []string) {
 			fatalErr(err)
 		}
 
-		if cmdName == "exam" {
-			if ok, listErr := paperInList(ctx, cl, paper.PaperID, paperType); listErr != nil {
-				collectLog("WARN", "[%s] exam 结果校验失败: %v", cmdName, listErr)
-			} else if !ok {
-				collectLog("WARN", "[%s] exam 试卷未出现在列表中: %s", cmdName, paper.PaperID)
-			}
+		if ok, listErr := paperInList(ctx, cl, paper.PaperID, paperType); listErr != nil {
+			collectLog("WARN", "exam 结果校验失败: %v", listErr)
+		} else if !ok {
+			collectLog("WARN", "exam 试卷未出现在列表中: %s", paper.PaperID)
 		}
 
-		if cmdName == "exam" || cmdName == "test" {
-			added, updated, skipped, err := upsertCollectedAnswers(ctx, st, res)
-			if err != nil {
-				fatalErr(err)
-			}
-			collectLog("OK", "题目回收: 模式=%s 试卷=%s 入库[新增=%d 更新=%d 跳过=%d]", cmdName, res.PaperID, added, updated, skipped)
+		added, updated, skipped, err := upsertCollectedAnswers(ctx, st, res)
+		if err != nil {
+			fatalErr(err)
 		}
+		collectLog("OK", "题目回收: 试卷=%s 入库[新增=%d 更新=%d 跳过=%d]", res.PaperID, added, updated, skipped)
 
 		if res.EndTime != nil {
 			collectLog("OK", "提交完成: 得分=%d endTime=%s", res.Mark, res.EndTime.Format(time.RFC3339))

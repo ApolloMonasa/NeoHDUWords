@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
-	"net/url"
 	"os"
 	"os/signal"
 	"regexp"
@@ -17,15 +16,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/chromedp/cdproto/network"
-	"github.com/chromedp/chromedp"
-
+	"hduwords/internal/browser"
 	"hduwords/internal/sklclient"
 	"hduwords/internal/store"
 )
 
 func runLoginDirect(reader *bufio.Reader) {
-	token, err := captureTokenByLogin()
+	browserType, _ := readLine(reader, "浏览器种类（chrome/edge，留空自动检测）")
+	browserType = strings.TrimSpace(browserType)
+
+	token, err := browser.CaptureTokenByLogin(browserType)
 	if err != nil {
 		fmt.Printf("登录失败：%v\n", err)
 		return
@@ -39,7 +39,10 @@ func runLoginDirect(reader *bufio.Reader) {
 }
 
 func runAddTokenDirect(reader *bufio.Reader) {
-	token, err := captureTokenByLogin()
+	browserType, _ := readLine(reader, "浏览器种类（chrome/edge，留空自动检测）")
+	browserType = strings.TrimSpace(browserType)
+
+	token, err := browser.CaptureTokenByLogin(browserType)
 	if err != nil {
 		fmt.Printf("addtoken 登录失败：%v\n", err)
 		return
@@ -103,9 +106,9 @@ func runSetPrimaryDirect(reader *bufio.Reader) {
 		fmt.Printf("设置主账号失败：%v\n", err)
 		return
 	}
-	if promptYesNoWithReader(reader, "是否同步写入 .token（供 exam/test 默认使用）？", true) {
+	if promptYesNoWithReader(reader, "是否同步写入 .token（供 exam 默认使用）？", true) {
 		saveToken(tk)
-		fmt.Println(">>> 已同步 .token，exam/test 将使用该账号。")
+		fmt.Println(">>> 已同步 .token，exam 将使用该账号。")
 	}
 	fmt.Printf(">>> 已设置主账号(primary): %s\n", formatToken(tk, false))
 }
@@ -214,24 +217,17 @@ func runCollectDirect(reader *bufio.Reader) {
 	fmt.Println("收集已停止，返回主菜单")
 }
 
-func runTestDirect(reader *bufio.Reader) {
-	runExamLikeDirect(reader, false)
-}
-
 func runExamDirect(reader *bufio.Reader) {
-	runExamLikeDirect(reader, true)
+	runExamLikeDirect(reader)
 }
 
-func runExamLikeDirect(reader *bufio.Reader, examMode bool) {
+func runExamLikeDirect(reader *bufio.Reader) {
 	dbPath, _ := readLine(reader, "数据库路径 [hduwords.db]")
 	if strings.TrimSpace(dbPath) == "" {
 		dbPath = "hduwords.db"
 	}
 	tokenURL := promptTokenURL(reader, false)
-	paperType := 0
-	if examMode {
-		paperType = 1
-	}
+	paperType := 1
 	timeWait, _ := readLine(reader, "交卷前等待时长 [30s]")
 	if strings.TrimSpace(timeWait) == "" {
 		timeWait = "30s"
@@ -253,23 +249,12 @@ func runExamLikeDirect(reader *bufio.Reader, examMode bool) {
 		timeoutStr = "15s"
 	}
 	timeout := mustDuration(timeoutStr, 15*time.Second)
-	unknownPolicy := "abort"
-	if examMode {
-		unknownPolicy = "random"
-	}
+	unknownPolicy := "random"
 	unknownPolicyInput, _ := readLine(reader, fmt.Sprintf("未知题策略 [abort|skip|random] (%s)", unknownPolicy))
 	if strings.TrimSpace(unknownPolicyInput) != "" {
 		unknownPolicy = strings.TrimSpace(unknownPolicyInput)
 	}
-	ua := defaultUserAgent
-	if examMode {
-		ua = examMobileUserAgent
-	} else {
-		uaInput, _ := readLine(reader, "UA [默认桌面 Chrome]")
-		if strings.TrimSpace(uaInput) != "" {
-			ua = strings.TrimSpace(uaInput)
-		}
-	}
+	ua := examMobileUserAgent
 	submitRetriesStr, _ := readLine(reader, "提交 403 重试次数 [3]")
 	if strings.TrimSpace(submitRetriesStr) == "" {
 		submitRetriesStr = "3"
@@ -281,12 +266,9 @@ func runExamLikeDirect(reader *bufio.Reader, examMode bool) {
 	submitRetries, _ := strconv.Atoi(strings.TrimSpace(submitRetriesStr))
 	retryCfg := submitRetryConfig{MaxRetries: submitRetries, Interval: mustDuration(submitRetryIntStr, 10*time.Second)}.normalized()
 
-	contextTimeout := 5 * time.Minute
-	if examMode {
-		contextTimeout = waitBeforeSubmit + 15*time.Minute
-		if contextTimeout < 20*time.Minute {
-			contextTimeout = 20 * time.Minute
-		}
+	contextTimeout := waitBeforeSubmit + 15*time.Minute
+	if contextTimeout < 20*time.Minute {
+		contextTimeout = 20 * time.Minute
 	}
 	reqCtx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 	defer cancel()
@@ -310,11 +292,11 @@ func runExamLikeDirect(reader *bufio.Reader, examMode bool) {
 		return
 	}
 
-	runPaperFlow(reqCtx, st, cl, paperType, waitBeforeSubmit, score, dryRun, policy, examMode, retryCfg)
+	runPaperFlow(reqCtx, st, cl, paperType, waitBeforeSubmit, score, dryRun, policy, retryCfg)
 }
 
-func runPaperFlow(ctx context.Context, st *store.Store, cl *sklclient.Client, paperType int, waitBeforeSubmit time.Duration, targetScore int, dryRun bool, policy unknownPolicy, examMode bool, retryCfg submitRetryConfig) {
-	if examMode && policy != unknownRandom {
+func runPaperFlow(ctx context.Context, st *store.Store, cl *sklclient.Client, paperType int, waitBeforeSubmit time.Duration, targetScore int, dryRun bool, policy unknownPolicy, retryCfg submitRetryConfig) {
+	if policy != unknownRandom {
 		policy = unknownRandom
 	}
 
@@ -325,10 +307,8 @@ func runPaperFlow(ctx context.Context, st *store.Store, cl *sklclient.Client, pa
 		if retryPaper != nil {
 			paper = *retryPaper
 			retryPaper = nil
-		} else if examMode {
-			paper, err = cl.CreateExamPaper(ctx, paperType)
 		} else {
-			paper, err = cl.GetOrCreateActivePaper(ctx, paperType)
+			paper, err = cl.CreateExamPaper(ctx, paperType)
 		}
 		if err != nil {
 			fmt.Printf("获取试卷失败：%v\n", err)
@@ -354,7 +334,7 @@ func runPaperFlow(ctx context.Context, st *store.Store, cl *sklclient.Client, pa
 
 		targetCorrect := -1
 		correctAssigned := 0
-		if examMode && targetScore >= 0 {
+		if targetScore >= 0 {
 			if targetScore > 100 {
 				fmt.Println("--score 必须在 0-100 之间")
 				return
@@ -373,7 +353,7 @@ func runPaperFlow(ctx context.Context, st *store.Store, cl *sklclient.Client, pa
 				fmt.Printf("查询题库失败：%v\n", err)
 				return
 			}
-			if examMode && targetScore >= 0 {
+			if targetScore >= 0 {
 				useCorrect := ok && correctAssigned < targetCorrect
 				if useCorrect {
 					idx := -1
@@ -459,7 +439,7 @@ func runPaperFlow(ctx context.Context, st *store.Store, cl *sklclient.Client, pa
 			fmt.Println("dry-run 已开启，不提交答案")
 			return
 		}
-		if examMode && waitBeforeSubmit > 0 {
+		if waitBeforeSubmit > 0 {
 			fmt.Printf("等待交卷：%v\n", waitBeforeSubmit)
 			if err := waitWithProgressBar(ctx, waitBeforeSubmit, "等待交卷"); err != nil {
 				fmt.Printf("等待被中断：%v\n", err)
@@ -505,13 +485,11 @@ func runPaperFlow(ctx context.Context, st *store.Store, cl *sklclient.Client, pa
 			fmt.Printf("提交后拉取结果失败：%v\n", err)
 			return
 		}
-		if examMode {
-			ok, listErr := paperInList(ctx, cl, paper.PaperID, paperType)
-			if listErr != nil {
-				fmt.Printf("exam 结果校验失败：%v\n", listErr)
-			} else if !ok {
-				fmt.Printf("exam 试卷未出现在列表中：%s\n", paper.PaperID)
-			}
+		ok, listErr := paperInList(ctx, cl, paper.PaperID, paperType)
+		if listErr != nil {
+			fmt.Printf("exam 结果校验失败：%v\n", listErr)
+		} else if !ok {
+			fmt.Printf("exam 试卷未出现在列表中：%s\n", paper.PaperID)
 		}
 		added, updated, skipped, err := upsertCollectedAnswers(ctx, st, res)
 		if err != nil {
@@ -649,57 +627,6 @@ func chooseWrongChoice(correct string, options []string) string {
 		}
 	}
 	return ""
-}
-
-func captureTokenByLogin() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("headless", false),
-		chromedp.Flag("disable-gpu", false),
-	)
-
-	allocCtx, allocCancel := chromedp.NewExecAllocator(ctx, opts...)
-	defer allocCancel()
-
-	taskCtx, taskCancel := chromedp.NewContext(allocCtx)
-	defer taskCancel()
-
-	fmt.Println(">>> 正在启动浏览器...")
-	fmt.Println(">>> 请在打开的浏览器中完成学校统一身份认证登录。")
-	fmt.Println(">>> 登录成功后，工具会自动捕获 Token 并保存，请勿提前关闭浏览器！")
-
-	tokenChan := make(chan string, 1)
-
-	chromedp.ListenTarget(taskCtx, func(ev interface{}) {
-		switch ev := ev.(type) {
-		case *network.EventRequestWillBeSent:
-			reqURL := ev.Request.URL
-			if strings.Contains(reqURL, "skl.hdu.edu.cn") && strings.Contains(reqURL, "token=") {
-				u, err := url.Parse(reqURL)
-				if err == nil {
-					if token := u.Query().Get("token"); token != "" {
-						select {
-						case tokenChan <- token:
-						default:
-						}
-					}
-				}
-			}
-		}
-	})
-
-	if err := chromedp.Run(taskCtx, chromedp.Navigate("https://skl.hdu.edu.cn/")); err != nil {
-		return "", fmt.Errorf("启动浏览器失败: %w", err)
-	}
-
-	select {
-	case token := <-tokenChan:
-		return token, nil
-	case <-ctx.Done():
-		return "", fmt.Errorf("等待登录超时或已取消")
-	}
 }
 
 func saveToken(token string) {
@@ -848,10 +775,6 @@ func getFinalTokenURL(rawURL string) string {
 		return ""
 	}
 	return fmt.Sprintf("https://skl.hdu.edu.cn/?type=6&token=%s#/english/list", token)
-}
-
-func chooseWrongChoiceWithSeed(correct string, options []string) string {
-	return chooseWrongChoice(correct, options)
 }
 
 func isForbiddenAPIError(err error) bool {

@@ -7,3 +7,6 @@
 .token
 .tokens
 docs
+tui
+cli
+hduwords

@@ -2,20 +2,23 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"flag"
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
-	"time"
 
-	"github.com/chromedp/cdproto/network"
-	"github.com/chromedp/chromedp"
+	"hduwords/internal/browser"
 )
 
 func loginCmd(args []string) {
-	token, err := captureTokenByLogin()
+	fs := flag.NewFlagSet("login", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	browserType := fs.String("browser", "", "浏览器种类: chrome|edge（留空自动检测）")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+
+	token, err := browser.CaptureTokenByLogin(*browserType)
 	if err != nil {
 		fatalf("登录失败: %v", err)
 	}
@@ -28,7 +31,14 @@ func loginCmd(args []string) {
 }
 
 func addTokenCmd(args []string) {
-	token, err := captureTokenByLogin()
+	fs := flag.NewFlagSet("addtoken", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	browserType := fs.String("browser", "", "浏览器种类: chrome|edge（留空自动检测）")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+
+	token, err := browser.CaptureTokenByLogin(*browserType)
 	if err != nil {
 		fatalf("addtoken 登录失败: %v", err)
 	}
@@ -102,60 +112,6 @@ func setPrimaryCmd(args []string) {
 	fmt.Printf(">>> 已设置主账号(primary): %s\n", formatToken(tk, false))
 	if *syncLogin {
 		fmt.Println(">>> 已同步 .token，exam/test 将使用该账号。")
-	}
-}
-
-func captureTokenByLogin() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("headless", false),
-		chromedp.Flag("disable-gpu", false),
-	)
-
-	allocCtx, allocCancel := chromedp.NewExecAllocator(ctx, opts...)
-	defer allocCancel()
-
-	taskCtx, taskCancel := chromedp.NewContext(allocCtx)
-	defer taskCancel()
-
-	fmt.Println(">>> 正在启动浏览器...")
-	fmt.Println(">>> 请在打开的浏览器中完成学校统一身份认证登录。")
-	fmt.Println(">>> 登录成功后，工具会自动捕获 Token 并保存，请勿提前关闭浏览器！")
-
-	tokenChan := make(chan string, 1)
-
-	chromedp.ListenTarget(taskCtx, func(ev interface{}) {
-		switch ev := ev.(type) {
-		case *network.EventRequestWillBeSent:
-			reqURL := ev.Request.URL
-			if strings.Contains(reqURL, "skl.hdu.edu.cn") && strings.Contains(reqURL, "token=") {
-				u, err := url.Parse(reqURL)
-				if err == nil {
-					if token := u.Query().Get("token"); token != "" {
-						select {
-						case tokenChan <- token:
-						default:
-						}
-					}
-				}
-			}
-		}
-	})
-
-	err := chromedp.Run(taskCtx,
-		chromedp.Navigate("https://skl.hdu.edu.cn/"),
-	)
-	if err != nil {
-		return "", fmt.Errorf("启动浏览器失败: %w", err)
-	}
-
-	select {
-	case token := <-tokenChan:
-		return token, nil
-	case <-ctx.Done():
-		return "", fmt.Errorf("等待登录超时或已取消")
 	}
 }
 
