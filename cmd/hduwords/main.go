@@ -76,6 +76,7 @@ Usage:
 	hduwords update  [--repo owner/name] [--updates-dir .updates] [--yes] [--check-only]
 	hduwords db stats --db <path>
 	hduwords db export --db <path> [--format json|markdown] [--out <file>]
+	hduwords db update [--out <file>]
 
 Commands:
 	login      自动打开浏览器，完成统一身份认证后后台自动捕获 Token 并保存至本地
@@ -184,6 +185,9 @@ func updateCmd(args []string) {
 	}
 
 	dest := filepath.Join(downloadDir, asset.Name)
+	if abs, err := filepath.Abs(dest); err == nil {
+		dest = abs
+	}
 	written, err := updatecheck.DownloadAsset(context.Background(), asset, dest)
 	if err != nil {
 		fatalErr(err)
@@ -1019,7 +1023,7 @@ func upsertCollectedAnswers(ctx context.Context, st *store.Store, res sklclient.
 
 func dbCmd(args []string) {
 	if len(args) < 1 {
-		fatalf("db subcommand required (stats|export|markdown)")
+		fatalf("db subcommand required (stats|export|markdown|update)")
 	}
 	switch args[0] {
 	case "stats":
@@ -1028,10 +1032,45 @@ func dbCmd(args []string) {
 		dbExportCmd(args[1:])
 	case "markdown", "export-md", "md":
 		dbMarkdownCmd(args[1:])
+	case "update":
+		dbUpdateCmd(args[1:])
 	default:
 		fatalf("unknown db subcommand: %s", args[0])
 	}
 }
+func dbUpdateCmd(args []string) {
+	fs := flag.NewFlagSet("db update", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	outFile := fs.String("out", "", "output file path (default next to executable)")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+
+	dest := strings.TrimSpace(*outFile)
+	if dest == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			exe = "hduwords"
+		}
+		dest = filepath.Join(filepath.Dir(exe), "hduwords.db")
+	}
+
+	asset := updatecheck.ReleaseAsset{
+		Name: "hduwords.db",
+		URL:  "https://github.com/ApolloMonasa/NeoHDUWords/releases/download/Data/hduwords.db",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	fmt.Printf("正在下载数据库 %s ...\n", asset.URL)
+	written, err := updatecheck.DownloadAsset(ctx, asset, dest)
+	if err != nil {
+		fatalErr(fmt.Errorf("下载数据库失败: %w", err))
+	}
+	fmt.Printf("数据库已保存至 %s (%d bytes)\n", dest, written)
+}
+
 func dbMarkdownCmd(args []string) {
 	fs := flag.NewFlagSet("db markdown", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)

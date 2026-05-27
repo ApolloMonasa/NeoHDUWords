@@ -76,6 +76,9 @@ func Run(args []string) error {
 						fmt.Printf("创建更新目录失败：%v\n", err)
 					} else {
 						dest := filepath.Join(downloadDir, asset.Name)
+						if abs, err := filepath.Abs(dest); err == nil {
+							dest = abs
+						}
 						written, derr := updatecheck.DownloadAsset(context.Background(), asset, dest)
 						if derr != nil {
 							fmt.Printf("下载更新失败：%v\n", derr)
@@ -397,6 +400,7 @@ func runDatabaseWizard(reader *bufio.Reader) {
 	fmt.Println("  1. stats")
 	fmt.Println("  2. export json")
 	fmt.Println("  3. export markdown")
+	fmt.Println("  4. update")
 	choice, _ := readLine(reader, "请选择")
 	switch strings.TrimSpace(choice) {
 	case "1":
@@ -405,6 +409,8 @@ func runDatabaseWizard(reader *bufio.Reader) {
 		runDBExportDirect(reader, false)
 	case "3":
 		runDBExportDirect(reader, true)
+	case "4":
+		runDBUpdateDirect()
 	default:
 		fmt.Println("无效选择")
 	}

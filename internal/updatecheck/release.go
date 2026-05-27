@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -73,7 +73,7 @@ func (r Release) AssetForCurrentPlatform(binaryName string) (ReleaseAsset, bool)
 	needleWithExe := needle + ".exe"
 	for _, a := range r.Assets {
 		name := strings.ToLower(a.Name)
-		base := strings.TrimSuffix(name, path.Ext(name))
+		base := strings.TrimSuffix(name, filepath.Ext(name))
 		if base == strings.ToLower(needle) || name == strings.ToLower(needleWithExe) {
 			return a, true
 		}
@@ -111,7 +111,7 @@ func DownloadAsset(ctx context.Context, asset ReleaseAsset, destPath string) (in
 }
 
 func ensureParentDir(destPath string) error {
-	parent := path.Dir(destPath)
+	parent := filepath.Dir(destPath)
 	if parent == "." || parent == "" {
 		return nil
 	}

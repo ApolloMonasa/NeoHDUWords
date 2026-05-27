@@ -17,10 +17,19 @@ func InstallBinary(srcPath, targetPath string) error {
 }
 
 func installBinaryPosix(srcPath, targetPath string) error {
-	if err := copyFile(srcPath, targetPath); err != nil {
+	tmpPath := targetPath + ".tmp"
+	if err := copyFile(srcPath, tmpPath); err != nil {
 		return err
 	}
-	return os.Chmod(targetPath, 0o755)
+	if err := os.Chmod(tmpPath, 0o755); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, targetPath); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 func installBinaryWindows(srcPath, targetPath string) error {

@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"hduwords/internal/browser"
 	"hduwords/internal/sklclient"
 	"hduwords/internal/store"
+	"hduwords/internal/updatecheck"
 )
 
 func runLoginDirect(reader *bufio.Reader) {
@@ -585,6 +587,30 @@ func runDBExportDirect(reader *bufio.Reader, markdown bool) {
 	if err := enc.Encode(items); err != nil {
 		fmt.Printf("写入导出文件失败：%v\n", err)
 	}
+}
+
+func runDBUpdateDirect() {
+	exe, err := os.Executable()
+	if err != nil {
+		exe = "hduwords"
+	}
+	dest := filepath.Join(filepath.Dir(exe), "hduwords.db")
+
+	asset := updatecheck.ReleaseAsset{
+		Name: "hduwords.db",
+		URL:  "https://github.com/ApolloMonasa/NeoHDUWords/releases/download/Data/hduwords.db",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	fmt.Printf("正在下载数据库 %s ...\n", asset.URL)
+	written, err := updatecheck.DownloadAsset(ctx, asset, dest)
+	if err != nil {
+		fmt.Printf("下载数据库失败：%v\n", err)
+		return
+	}
+	fmt.Printf("数据库已保存至 %s (%d bytes)\n", dest, written)
 }
 
 func promptTokenURL(reader *bufio.Reader, optional bool) string {
