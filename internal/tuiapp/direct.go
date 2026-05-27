@@ -611,6 +611,9 @@ func runDBUpdateDirect() {
 		return
 	}
 	fmt.Printf("数据库已保存至 %s (%d bytes)\n", dest, written)
+	// Remove stale WAL/SHM files so subsequent opens read the fresh db.
+	os.Remove(dest + "-wal")
+	os.Remove(dest + "-shm")
 }
 
 func promptTokenURL(reader *bufio.Reader, optional bool) string {

@@ -1069,6 +1069,10 @@ func dbUpdateCmd(args []string) {
 		fatalErr(fmt.Errorf("下载数据库失败: %w", err))
 	}
 	fmt.Printf("数据库已保存至 %s (%d bytes)\n", dest, written)
+
+	// Remove stale WAL/SHM files so subsequent opens read the fresh db.
+	os.Remove(dest + "-wal")
+	os.Remove(dest + "-shm")
 }
 
 func dbMarkdownCmd(args []string) {
