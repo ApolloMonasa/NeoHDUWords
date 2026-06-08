@@ -1,6 +1,7 @@
 # HDU Words
 
 > 自动化"我爱记单词"答题工具，支持题库收集与正式考试。提供 **TUI（推荐）** 和 CLI 双入口。
+<img width="1094" height="722" alt="image" src="https://github.com/user-attachments/assets/ceef34a6-363d-45c4-b623-84283061e7e7" />
 
 ## 下载
 
