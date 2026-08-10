@@ -1,3 +1,5 @@
+
+
 # 我爱记单词？？？
 # 我不爱记单词！！！
 
@@ -70,7 +72,8 @@ TUI 启动时会自动检查更新，检测到新版本会提示下载安装。
 CLI 自更新：
 ```bash
 ./cli update              # 检查并安装更新
-./cli update --check-only # 仅检查
+./cli update --check-only # 仅检查，不安装
+./cli update --yes        # 跳过确认，直接安装
 ```
 
 ---
