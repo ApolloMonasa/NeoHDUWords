@@ -25,4 +25,3 @@ func UniqueHash(stem string, options []string) string {
 	sum := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(sum[:])
 }
-

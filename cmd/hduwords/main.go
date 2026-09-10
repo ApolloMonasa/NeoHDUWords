@@ -21,6 +21,7 @@ import (
 
 	"hduwords/internal/sklclient"
 	"hduwords/internal/store"
+	"hduwords/internal/tokenpool"
 	"hduwords/internal/updatecheck"
 )
 
@@ -653,10 +654,11 @@ func collectCmd(args []string) {
 	paperType := 0
 	retryCfg := submitRetryConfig{MaxRetries: *submitRetries, Interval: *submitRetryInt}.normalized()
 
-	poolTokens, err := loadPoolTokens(*poolFile)
+	pool, err := tokenpool.Load(*poolFile)
 	if err != nil {
 		fatalErr(fmt.Errorf("load token pool: %w", err))
 	}
+	poolTokens := pool.Tokens
 
 	workerURLs := make([]string, 0)
 	if len(poolTokens) > 0 {

@@ -1,13 +1,13 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
 
 	"hduwords/internal/browser"
+	"hduwords/internal/tokenpool"
 )
 
 func loginCmd(args []string) {
@@ -23,8 +23,10 @@ func loginCmd(args []string) {
 		fatalf("登录失败: %v", err)
 	}
 	fmt.Println(">>> 成功捕获到 Token!")
-	saveToken(token)
-	if err := setPrimaryTokenInPool(".tokens", token); err != nil {
+	if err := tokenpool.SaveMain(tokenpool.DefaultMainFile, token); err != nil {
+		fatalf("保存 token 失败: %v", err)
+	}
+	if err := tokenpool.SetPrimary(tokenpool.DefaultPoolFile, token); err != nil {
 		fmt.Printf(">>> 警告: 同步 .tokens 主账号标识失败: %v\n", err)
 	}
 	fmt.Println(">>> 已保存 Token 到本地 .token 文件，后续命令无需再提供 --url 参数。")
@@ -43,7 +45,7 @@ func addTokenCmd(args []string) {
 		fatalf("addtoken 登录失败: %v", err)
 	}
 	fmt.Println(">>> 成功捕获到 Token!")
-	added, err := appendPoolToken(".tokens", token)
+	added, err := tokenpool.Append(tokenpool.DefaultPoolFile, token)
 	if err != nil {
 		fatalf("写入 token 池失败: %v", err)
 	}
@@ -57,19 +59,19 @@ func addTokenCmd(args []string) {
 func listTokensCmd(args []string) {
 	fs := flag.NewFlagSet("listtokens", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	poolFile := fs.String("pool-file", ".tokens", "token pool file path")
+	poolFile := fs.String("pool-file", tokenpool.DefaultPoolFile, "token pool file path")
 	showPlain := fs.Bool("show-plain", false, "show full token text")
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
 
-	mainToken, _ := loadToken()
-	pool, err := loadTokenPool(*poolFile)
+	mainToken, _ := tokenpool.LoadMain(tokenpool.DefaultMainFile)
+	pool, err := tokenpool.Load(*poolFile)
 	if err != nil {
 		fatalf("读取 token 池失败: %v", err)
 	}
 
-	fmt.Printf("主账号(.token): %s\n", formatToken(mainToken, *showPlain))
+	fmt.Printf("主账号(.token): %s\n", tokenpool.Format(mainToken, *showPlain))
 	fmt.Printf("token池(%s): 共 %d 个\n", *poolFile, len(pool.Tokens))
 	for i, tk := range pool.Tokens {
 		role := "member"
@@ -80,14 +82,14 @@ func listTokensCmd(args []string) {
 		if mainToken != "" && tk == mainToken {
 			bind = " [= .token]"
 		}
-		fmt.Printf("%d. (%s)%s %s\n", i+1, role, bind, formatToken(tk, *showPlain))
+		fmt.Printf("%d. (%s)%s %s\n", i+1, role, bind, tokenpool.Format(tk, *showPlain))
 	}
 }
 
 func setPrimaryCmd(args []string) {
 	fs := flag.NewFlagSet("setprimary", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	poolFile := fs.String("pool-file", ".tokens", "token pool file path")
+	poolFile := fs.String("pool-file", tokenpool.DefaultPoolFile, "token pool file path")
 	token := fs.String("token", "", "token to set as primary")
 	syncLogin := fs.Bool("sync-login", true, "sync primary token to .token for exam/test")
 	if err := fs.Parse(args); err != nil {
@@ -97,174 +99,31 @@ func setPrimaryCmd(args []string) {
 	tk := strings.TrimSpace(*token)
 	if tk == "" {
 		var err error
-		tk, err = loadToken()
+		tk, err = tokenpool.LoadMain(tokenpool.DefaultMainFile)
 		if err != nil || tk == "" {
 			fatalf("未提供 --token 且本地 .token 不可用")
 		}
 	}
 
-	if err := setPrimaryTokenInPool(*poolFile, tk); err != nil {
+	if err := tokenpool.SetPrimary(*poolFile, tk); err != nil {
 		fatalf("设置主账号失败: %v", err)
 	}
 	if *syncLogin {
-		saveToken(tk)
+		if err := tokenpool.SaveMain(tokenpool.DefaultMainFile, tk); err != nil {
+			fatalf("保存 token 失败: %v", err)
+		}
 	}
-	fmt.Printf(">>> 已设置主账号(primary): %s\n", formatToken(tk, false))
+	fmt.Printf(">>> 已设置主账号(primary): %s\n", tokenpool.Format(tk, false))
 	if *syncLogin {
 		fmt.Println(">>> 已同步 .token，exam/test 将使用该账号。")
 	}
-}
-
-func saveToken(token string) {
-	err := os.WriteFile(".token", []byte(token), 0600)
-	if err != nil {
-		fatalf("保存 token 失败: %v", err)
-	}
-}
-
-func loadToken() (string, error) {
-	b, err := os.ReadFile(".token")
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(b)), nil
-}
-
-func loadPoolTokens(path string) ([]string, error) {
-	p, err := loadTokenPool(path)
-	if err != nil {
-		return nil, err
-	}
-	return p.Tokens, nil
-}
-
-func appendPoolToken(path, token string) (bool, error) {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return false, fmt.Errorf("empty token")
-	}
-
-	pool, err := loadTokenPool(path)
-	if err != nil {
-		return false, err
-	}
-	if containsToken(pool.Tokens, token) {
-		return false, nil
-	}
-	pool.Tokens = append(pool.Tokens, token)
-	if err := saveTokenPool(path, pool); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-type tokenPool struct {
-	Primary string
-	Tokens  []string
-}
-
-func setPrimaryTokenInPool(path, token string) error {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return fmt.Errorf("empty token")
-	}
-	p, err := loadTokenPool(path)
-	if err != nil {
-		return err
-	}
-	if !containsToken(p.Tokens, token) {
-		p.Tokens = append(p.Tokens, token)
-	}
-	p.Primary = token
-	return saveTokenPool(path, p)
-}
-
-func loadTokenPool(path string) (tokenPool, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return tokenPool{}, nil
-		}
-		return tokenPool{}, err
-	}
-	defer f.Close()
-
-	out := tokenPool{}
-	seen := make(map[string]struct{})
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		isPrimary := strings.HasPrefix(line, "*")
-		if isPrimary {
-			line = strings.TrimSpace(strings.TrimPrefix(line, "*"))
-		}
-		if line == "" {
-			continue
-		}
-		if _, ok := seen[line]; ok {
-			if isPrimary && out.Primary == "" {
-				out.Primary = line
-			}
-			continue
-		}
-		seen[line] = struct{}{}
-		out.Tokens = append(out.Tokens, line)
-		if isPrimary && out.Primary == "" {
-			out.Primary = line
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return tokenPool{}, err
-	}
-	if out.Primary != "" && !containsToken(out.Tokens, out.Primary) {
-		out.Tokens = append(out.Tokens, out.Primary)
-	}
-	return out, nil
-}
-
-func saveTokenPool(path string, p tokenPool) error {
-	var b strings.Builder
-	b.WriteString("# token pool; prefix '*' means primary token\n")
-	if p.Primary != "" {
-		b.WriteString("*" + p.Primary + "\n")
-	}
-	for _, tk := range p.Tokens {
-		if tk == "" || tk == p.Primary {
-			continue
-		}
-		b.WriteString(tk + "\n")
-	}
-	return os.WriteFile(path, []byte(b.String()), 0600)
-}
-
-func containsToken(tokens []string, token string) bool {
-	for _, t := range tokens {
-		if t == token {
-			return true
-		}
-	}
-	return false
-}
-
-func formatToken(token string, plain bool) string {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return "(empty)"
-	}
-	if plain || len(token) <= 12 {
-		return token
-	}
-	return token[:6] + "..." + token[len(token)-6:]
 }
 
 func getFinalTokenURL(rawURL string) string {
 	if rawURL != "" {
 		return rawURL
 	}
-	token, err := loadToken()
+	token, err := tokenpool.LoadMain(tokenpool.DefaultMainFile)
 	if err != nil || token == "" {
 		fatalf("未提供 --url 且本地无有效的 .token 文件，请先运行 hduwords login 或提供 --url 参数")
 	}

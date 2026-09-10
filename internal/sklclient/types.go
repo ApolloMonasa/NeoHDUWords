@@ -17,13 +17,13 @@ type Paper struct {
 }
 
 type PaperDetail struct {
-	PaperID  string     `json:"paperId"`
-	Type     string     `json:"type"`
-	Week     int        `json:"week"`
+	PaperID   string     `json:"paperId"`
+	Type      string     `json:"type"`
+	Week      int        `json:"week"`
 	StartTime *time.Time `json:"startTime"`
-	EndTime  *time.Time `json:"endTime"`
-	Mark     int        `json:"mark"`
-	List     []Question `json:"list"`
+	EndTime   *time.Time `json:"endTime"`
+	Mark      int        `json:"mark"`
+	List      []Question `json:"list"`
 }
 
 type Question struct {
@@ -46,4 +46,3 @@ func (q Question) Options() []string {
 type SaveInput struct {
 	Question
 }
-

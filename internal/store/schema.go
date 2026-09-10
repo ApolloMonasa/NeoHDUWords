@@ -31,4 +31,3 @@ CREATE TABLE IF NOT EXISTS conflicts_v2 (
   FOREIGN KEY(item_id) REFERENCES items_v2(id) ON DELETE CASCADE
 );
 `
-
