@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -118,48 +117,18 @@ func runCollectDirect(reader *bufio.Reader) {
 	ctx, cancel := context.WithCancel(baseCtx)
 	defer cancel()
 
-	dbPath, _ := readLine(reader, "数据库路径 [hduwords.db]")
-	if strings.TrimSpace(dbPath) == "" {
-		dbPath = "hduwords.db"
-	}
-	tokenURL := promptTokenURL(reader, false)
-	rateStr, _ := readLine(reader, "请求速率 [2]")
-	if strings.TrimSpace(rateStr) == "" {
-		rateStr = "2"
-	}
-	rate, _ := strconv.ParseFloat(strings.TrimSpace(rateStr), 64)
-	timeoutStr, _ := readLine(reader, "超时 [15s]")
-	if strings.TrimSpace(timeoutStr) == "" {
-		timeoutStr = "15s"
-	}
-	ua, _ := readLine(reader, "UA [默认桌面 Chrome]")
-	if strings.TrimSpace(ua) == "" {
-		ua = sklclient.DefaultUserAgent
-	}
-	cooldownStr, _ := readLine(reader, "冷却时间 [5m]")
-	if strings.TrimSpace(cooldownStr) == "" {
-		cooldownStr = "5m"
-	}
-	poolFile, _ := readLine(reader, "token 池文件 [.tokens]")
-	if strings.TrimSpace(poolFile) == "" {
-		poolFile = tokenpool.DefaultPoolFile
-	}
-	workersStr, _ := readLine(reader, "worker 数 [0]")
-	if strings.TrimSpace(workersStr) == "" {
-		workersStr = "0"
-	}
-	workers, _ := strconv.Atoi(strings.TrimSpace(workersStr))
-	submitRetriesStr, _ := readLine(reader, "提交 403 重试次数 [3]")
-	if strings.TrimSpace(submitRetriesStr) == "" {
-		submitRetriesStr = "3"
-	}
-	submitRetryIntStr, _ := readLine(reader, "提交 403 重试间隔 [10s]")
-	if strings.TrimSpace(submitRetryIntStr) == "" {
-		submitRetryIntStr = "10s"
-	}
-	submitRetries, _ := strconv.Atoi(strings.TrimSpace(submitRetriesStr))
+	dbPath := readString(reader, "数据库路径 [hduwords.db]", "hduwords.db")
+	tokenURL := promptTokenURL(reader)
+	rate := readFloat(reader, "请求速率 [2]", 2)
+	timeout := readDuration(reader, "超时 [15s]", 15*time.Second)
+	ua := readString(reader, "UA [默认桌面 Chrome]", sklclient.DefaultUserAgent)
+	cooldown := readDuration(reader, "冷却时间 [5m]", 5*time.Minute)
+	poolFile := readString(reader, "token 池文件 [.tokens]", tokenpool.DefaultPoolFile)
+	workers := readInt(reader, "worker 数 [0]", 0)
+	submitRetries := readInt(reader, "提交 403 重试次数 [3]", 3)
+	submitRetryInt := readDuration(reader, "提交 403 重试间隔 [10s]", 10*time.Second)
 
-	retryCfg := engine.SubmitRetryConfig{MaxRetries: submitRetries, Interval: mustDuration(submitRetryIntStr, 10*time.Second)}.Normalized()
+	retryCfg := engine.SubmitRetryConfig{MaxRetries: submitRetries, Interval: submitRetryInt}.Normalized()
 	st, err := store.Open(dbPath)
 	if err != nil {
 		fmt.Printf("打开数据库失败：%v\n", err)
@@ -175,7 +144,7 @@ func runCollectDirect(reader *bufio.Reader) {
 
 	specs := engine.BuildWorkers(pool.Tokens, resolveURLForTUI(tokenURL), workers, sklclient.Options{
 		BaseUserAgent: ua,
-		Timeout:       mustDuration(timeoutStr, 15*time.Second),
+		Timeout:       timeout,
 		MaxRPS:        rate,
 	}, collectLog)
 	if len(specs) == 0 {
@@ -187,7 +156,7 @@ func runCollectDirect(reader *bufio.Reader) {
 	engine.RunCollectPool(ctx, engine.CollectPoolOptions{
 		Workers:  specs,
 		Store:    st,
-		Cooldown: mustDuration(cooldownStr, 5*time.Minute),
+		Cooldown: cooldown,
 		Retry:    retryCfg,
 		Log:      collectLog,
 	})
@@ -195,42 +164,16 @@ func runCollectDirect(reader *bufio.Reader) {
 }
 
 func runExamDirect(reader *bufio.Reader) {
-	dbPath, _ := readLine(reader, "数据库路径 [hduwords.db]")
-	if strings.TrimSpace(dbPath) == "" {
-		dbPath = "hduwords.db"
-	}
-	tokenURL := promptTokenURL(reader, false)
-	timeWait, _ := readLine(reader, "交卷前等待时长 [30s]")
-	if strings.TrimSpace(timeWait) == "" {
-		timeWait = "30s"
-	}
-	waitBeforeSubmit := mustDuration(timeWait, 30*time.Second)
-	scoreStr, _ := readLine(reader, "目标得分百分比 [-1]")
-	if strings.TrimSpace(scoreStr) == "" {
-		scoreStr = "-1"
-	}
-	score, _ := strconv.Atoi(strings.TrimSpace(scoreStr))
+	dbPath := readString(reader, "数据库路径 [hduwords.db]", "hduwords.db")
+	tokenURL := promptTokenURL(reader)
+	waitBeforeSubmit := readDuration(reader, "交卷前等待时长 [30s]", 30*time.Second)
+	score := readInt(reader, "目标得分百分比 [-1]", -1)
 	dryRun := promptYesNoWithReader(reader, "是否 dry-run？", false)
-	rateStr, _ := readLine(reader, "请求速率 [2]")
-	if strings.TrimSpace(rateStr) == "" {
-		rateStr = "2"
-	}
-	rate, _ := strconv.ParseFloat(strings.TrimSpace(rateStr), 64)
-	timeoutStr, _ := readLine(reader, "超时 [15s]")
-	if strings.TrimSpace(timeoutStr) == "" {
-		timeoutStr = "15s"
-	}
-	timeout := mustDuration(timeoutStr, 15*time.Second)
-	submitRetriesStr, _ := readLine(reader, "提交 403 重试次数 [3]")
-	if strings.TrimSpace(submitRetriesStr) == "" {
-		submitRetriesStr = "3"
-	}
-	submitRetryIntStr, _ := readLine(reader, "提交 403 重试间隔 [10s]")
-	if strings.TrimSpace(submitRetryIntStr) == "" {
-		submitRetryIntStr = "10s"
-	}
-	submitRetries, _ := strconv.Atoi(strings.TrimSpace(submitRetriesStr))
-	retryCfg := engine.SubmitRetryConfig{MaxRetries: submitRetries, Interval: mustDuration(submitRetryIntStr, 10*time.Second)}.Normalized()
+	rate := readFloat(reader, "请求速率 [2]", 2)
+	timeout := readDuration(reader, "超时 [15s]", 15*time.Second)
+	submitRetries := readInt(reader, "提交 403 重试次数 [3]", 3)
+	submitRetryInt := readDuration(reader, "提交 403 重试间隔 [10s]", 10*time.Second)
+	retryCfg := engine.SubmitRetryConfig{MaxRetries: submitRetries, Interval: submitRetryInt}.Normalized()
 
 	st, err := store.Open(dbPath)
 	if err != nil {
@@ -348,12 +291,8 @@ func runDBUpdateDirect() {
 	os.Remove(dest + "-shm")
 }
 
-func promptTokenURL(reader *bufio.Reader, optional bool) string {
-	prompt := "token URL（留空则使用 .token）"
-	if optional {
-		prompt += " [可空]"
-	}
-	tokenURL, _ := readLine(reader, prompt)
+func promptTokenURL(reader *bufio.Reader) string {
+	tokenURL, _ := readLine(reader, "token URL（留空则使用 .token）")
 	return strings.TrimSpace(tokenURL)
 }
 
@@ -367,18 +306,6 @@ func resolveURLForTUI(raw string) string {
 		return getFinalTokenURL("")
 	}
 	return fmt.Sprintf("https://skl.hdu.edu.cn/?type=6&token=%s#/english/list", token)
-}
-
-func mustDuration(raw string, fallback time.Duration) time.Duration {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return fallback
-	}
-	d, err := time.ParseDuration(raw)
-	if err != nil {
-		return fallback
-	}
-	return d
 }
 
 func getFinalTokenURL(rawURL string) string {
