@@ -111,7 +111,7 @@
 ## 数据库管理
 
 ```bash
-./cli db update                     # 下载最新题库（保存到程序所在目录的 hduwords.db）
+./cli db update                     # 下载最新题库（保存到当前目录的 hduwords.db）
 ./cli db stats --db mywords.db      # 查看统计：题目数 / 答案数 / 冲突数
 ./cli db export --db mywords.db     # 导出为 JSON
 ./cli db markdown --db mywords.db   # 导出为 Markdown（方便阅读、打印）
@@ -173,6 +173,7 @@ TUI 中对应：主菜单 `4. 数据库`。
 ```
 
 - CLI 和 TUI 各自独立检查、独立更新自己
+- 更新包下载后会校验 SHA256（老版本发行版没有校验文件时自动跳过）
 - TUI 无需手动操作，启动时自动检查
 
 ---
@@ -186,7 +187,7 @@ TUI 中对应：主菜单 `4. 数据库`。
 检查电脑是否装了 Chrome 或 Edge；也可以手动指定：`./cli login --browser edge`（或 `chrome`）。
 
 ### 题库下载到哪了？
-`db update` 会把 `hduwords.db` 下载到**程序所在的文件夹**。而收集/考试默认在**当前运行目录**找 `hduwords.db`——如果你习惯在别的目录启动程序，记得用 `--db` 指定题库路径；最省心的做法是把程序和题库放在同一个文件夹里运行。
+`db update` 会把 `hduwords.db` 下载到**当前运行目录**，收集/考试也默认在当前目录找它——只要你在程序所在的文件夹里运行，一切自动就对上了。如果你习惯在别的目录启动程序，记得用 `--db` 指定题库路径。
 
 ### 为什么 db export 输出很少或为空？
 多半是 `--db` 没指向你实际在用的那个题库文件，检查一下路径。
