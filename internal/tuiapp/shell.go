@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -78,7 +79,18 @@ func Run(args []string) error {
 							fmt.Printf("下载更新失败：%v\n", derr)
 						} else {
 							fmt.Printf("更新包已下载：%s (%d bytes)\n", dest, written)
-							if promptYesNoWithReader(reader, "是否立即安装更新？", true) {
+							installable := true
+							if verr := updatecheck.VerifyAssetChecksum(context.Background(), release, asset.Name, dest); verr != nil {
+								if errors.Is(verr, updatecheck.ErrNoSumsAsset) || errors.Is(verr, updatecheck.ErrAssetNotInSums) {
+									fmt.Printf("警告：%v，跳过完整性校验\n", verr)
+								} else {
+									fmt.Printf("更新包完整性校验失败：%v\n，已取消安装\n", verr)
+									installable = false
+								}
+							} else {
+								fmt.Println("更新包完整性校验通过")
+							}
+							if installable && promptYesNoWithReader(reader, "是否立即安装更新？", true) {
 								if ierr := installSelfUpdate(dest); ierr != nil {
 									fmt.Printf("安装更新失败：%v\n", ierr)
 								} else {

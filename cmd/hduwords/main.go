@@ -192,6 +192,18 @@ func updateCmd(args []string) {
 	}
 	fmt.Printf("更新包已下载：%s (%d bytes)\n", dest, written)
 
+	if verr := updatecheck.VerifyAssetChecksum(context.Background(), release, asset.Name, dest); verr != nil {
+		if errors.Is(verr, updatecheck.ErrNoSumsAsset) {
+			fmt.Println("当前发行版未提供 SHA256SUMS，跳过完整性校验")
+		} else if errors.Is(verr, updatecheck.ErrAssetNotInSums) {
+			fmt.Printf("警告：%v，跳过完整性校验\n", verr)
+		} else {
+			fatalErr(fmt.Errorf("更新包完整性校验失败: %w", verr))
+		}
+	} else {
+		fmt.Println("更新包完整性校验通过")
+	}
+
 	if err := installSelfUpdateCLI(dest); err != nil {
 		fatalErr(err)
 	}

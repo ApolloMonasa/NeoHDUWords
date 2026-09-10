@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"hduwords/internal/match"
@@ -37,14 +36,6 @@ func (s *Store) Close() error {
 		return nil
 	}
 	return s.db.Close()
-}
-
-func (s *Store) init(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, schemaSQL)
-	if err != nil {
-		return fmt.Errorf("init schema: %w", err)
-	}
-	return nil
 }
 
 func (s *Store) FindAnswerText(ctx context.Context, stem string, options []string) (string, bool, error) {

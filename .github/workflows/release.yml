@@ -72,6 +72,9 @@ jobs:
           GOARCH: arm64
         run: go build -trimpath -ldflags "-s -w -X hduwords/internal/buildinfo.Version=${{ github.ref_name }} -X hduwords/internal/buildinfo.Commit=${{ github.sha }}" -o dist/tui-darwin-arm64 ./cmd/tui
 
+      - name: Generate SHA256SUMS
+        run: cd dist && sha256sum * > SHA256SUMS
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -84,3 +87,4 @@ jobs:
             dist/tui-darwin-amd64
             dist/cli-darwin-arm64
             dist/tui-darwin-arm64
+            dist/SHA256SUMS
