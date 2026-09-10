@@ -3,18 +3,15 @@ package tuiapp
 import (
 	"bufio"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
-	"hduwords/internal/buildinfo"
 	"hduwords/internal/updatecheck"
+	"hduwords/internal/updater"
 )
 
 const defaultTUIRepo = "ApolloMonasa/NeoHDUWords"
@@ -35,74 +32,23 @@ func Run(args []string) error {
 		return err
 	}
 
-	startDir, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
 	clearScreen()
 	printSplash(repo)
 	reader := bufio.NewReader(os.Stdin)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-
-	status, err := updatecheck.Check(ctx, repo, startDir)
+	installed, err := updater.Run(context.Background(), updater.Options{
+		Repo:       repo,
+		BinaryName: "tui",
+		UpdatesDir: *updatesDirFlag,
+		Reader:     reader,
+		ApplyArgs: func(source, target string) []string {
+			return []string{"--apply-update", "--source", source, "--target", target}
+		},
+	})
 	if err != nil {
 		fmt.Printf("\n更新检查失败：%v\n", err)
-	} else {
-		showUpdateStatus(status)
-		if status.Available && promptYesNoWithReader(reader, "检测到仓库有更新，是否下载并安装？", false) {
-			releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 20*time.Second)
-			release, rerr := updatecheck.LatestRelease(releaseCtx, repo)
-			releaseCancel()
-			if rerr != nil {
-				fmt.Printf("获取最新发行版失败：%v\n", rerr)
-			} else {
-				asset, ok := release.AssetForCurrentPlatform("tui")
-				if !ok {
-					fmt.Printf("最新发行版 %s 没有匹配当前平台的 tui 资产\n", release.TagName)
-				} else {
-					downloadDir := strings.TrimSpace(*updatesDirFlag)
-					if downloadDir == "" {
-						downloadDir = ".updates"
-					}
-					if err := os.MkdirAll(downloadDir, 0o755); err != nil {
-						fmt.Printf("创建更新目录失败：%v\n", err)
-					} else {
-						dest := filepath.Join(downloadDir, asset.Name)
-						if abs, err := filepath.Abs(dest); err == nil {
-							dest = abs
-						}
-						written, derr := updatecheck.DownloadAsset(context.Background(), asset, dest)
-						if derr != nil {
-							fmt.Printf("下载更新失败：%v\n", derr)
-						} else {
-							fmt.Printf("更新包已下载：%s (%d bytes)\n", dest, written)
-							installable := true
-							if verr := updatecheck.VerifyAssetChecksum(context.Background(), release, asset.Name, dest); verr != nil {
-								if errors.Is(verr, updatecheck.ErrNoSumsAsset) || errors.Is(verr, updatecheck.ErrAssetNotInSums) {
-									fmt.Printf("警告：%v，跳过完整性校验\n", verr)
-								} else {
-									fmt.Printf("更新包完整性校验失败：%v\n，已取消安装\n", verr)
-									installable = false
-								}
-							} else {
-								fmt.Println("更新包完整性校验通过")
-							}
-							if installable && promptYesNoWithReader(reader, "是否立即安装更新？", true) {
-								if ierr := installSelfUpdate(dest); ierr != nil {
-									fmt.Printf("安装更新失败：%v\n", ierr)
-								} else {
-									fmt.Println("更新已启动安装，程序将退出。")
-									return nil
-								}
-							}
-						}
-					}
-				}
-			}
-		}
+	} else if installed {
+		return nil
 	}
 
 	menuLoop(reader)
@@ -128,46 +74,12 @@ func printSplash(repo updatecheck.Repo) {
 	if shouldUseColor() {
 		fmt.Print("\x1b[0m")
 	}
-	if v := versionString(); v != "" {
+	if v := updater.VersionString(); v != "" {
 		fmt.Printf("  version: %s\n", v)
 	}
 	fmt.Printf("  %s\n", repo.URL())
 	fmt.Printf("  platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 	fmt.Println()
-}
-
-func versionString() string {
-	if v := strings.TrimSpace(buildinfo.Version); v != "" && v != "dev" {
-		if c := strings.TrimSpace(buildinfo.Commit); c != "" && c != "unknown" {
-			return fmt.Sprintf("%s (%s)", v, shortSHA(c))
-		}
-		return v
-	}
-	return ""
-}
-
-func showUpdateStatus(status updatecheck.Status) {
-	if status.LocalVersion != "" {
-		if status.LocalSHA != "" {
-			fmt.Printf("当前版本：%s (%s)\n", status.LocalVersion, shortSHA(status.LocalSHA))
-		} else {
-			fmt.Printf("当前版本：%s\n", status.LocalVersion)
-		}
-	} else if status.LocalSHA == "" {
-		fmt.Println("当前版本：无法读取本地 Git 信息")
-	} else {
-		fmt.Printf("当前版本：%s (%s)\n", shortSHA(status.LocalSHA), status.LocalBranch)
-	}
-	if status.RemoteSHA == "" {
-		fmt.Println("远端版本：无法获取")
-		return
-	}
-	fmt.Printf("远端版本：%s (%s)\n", shortSHA(status.RemoteSHA), status.RemoteBranch)
-	if status.Available {
-		fmt.Println("状态：有更新")
-	} else {
-		fmt.Println("状态：已是最新")
-	}
 }
 
 func menuLoop(reader *bufio.Reader) {
@@ -276,47 +188,8 @@ func runTokenWizard(reader *bufio.Reader) {
 	}
 }
 
-func installSelfUpdate(sourcePath string) error {
-	selfExe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	helperDir, err := os.MkdirTemp("", "hduwords-updater-*")
-	if err != nil {
-		return err
-	}
-	helperPath := filepath.Join(helperDir, filepath.Base(selfExe))
-	if err := copyLocalFile(selfExe, helperPath); err != nil {
-		return err
-	}
-	cmd := exec.Command(helperPath, "--apply-update", "--source", sourcePath, "--target", selfExe)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func copyLocalFile(srcPath, dstPath string) error {
-	input, err := os.ReadFile(srcPath)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dstPath, input, 0o755)
-}
-
 func clearScreen() {
 	fmt.Print("\033[2J\033[H")
-}
-
-func shortSHA(sha string) string {
-	sha = strings.TrimSpace(sha)
-	if len(sha) > 7 {
-		return sha[:7]
-	}
-	return sha
 }
 
 func readLine(reader *bufio.Reader, prompt string) (string, error) {
@@ -326,18 +199,4 @@ func readLine(reader *bufio.Reader, prompt string) (string, error) {
 		return strings.TrimSpace(line), err
 	}
 	return strings.TrimSpace(line), nil
-}
-
-func promptYesNoWithReader(reader *bufio.Reader, prompt string, defaultYes bool) bool {
-	defaultLabel := "y/N"
-	if defaultYes {
-		defaultLabel = "Y/n"
-	}
-	fmt.Printf("%s [%s]: ", prompt, defaultLabel)
-	line, _ := reader.ReadString('\n')
-	line = strings.ToLower(strings.TrimSpace(line))
-	if line == "" {
-		return defaultYes
-	}
-	return line == "y" || line == "yes" || line == "1" || line == "true"
 }

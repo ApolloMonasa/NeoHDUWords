@@ -18,6 +18,7 @@ import (
 	"hduwords/internal/store"
 	"hduwords/internal/tokenpool"
 	"hduwords/internal/updatecheck"
+	"hduwords/internal/updater"
 )
 
 func runLoginDirect(reader *bufio.Reader) {
@@ -88,7 +89,7 @@ func notifyMigratedTUI(st *tokenpool.Store) {
 
 func runListTokensDirect(reader *bufio.Reader) {
 	accountsFile := readString(reader, "凭证库文件 [accounts.json]", tokenpool.DefaultAccountsFile)
-	showPlain := promptYesNoWithReader(reader, "是否显示完整 token 文本？", false)
+	showPlain := updater.PromptYesNo(reader, "是否显示完整 token 文本？", false)
 
 	st, err := tokenpool.LoadStore(accountsFile)
 	if err != nil {
@@ -208,7 +209,7 @@ func runExamDirect(reader *bufio.Reader) {
 	tokenURL := promptTokenURL(reader)
 	waitBeforeSubmit := readDuration(reader, "交卷前等待时长 [30s]", 30*time.Second)
 	score := readInt(reader, "目标得分百分比 [-1]", -1)
-	dryRun := promptYesNoWithReader(reader, "是否 dry-run？", false)
+	dryRun := updater.PromptYesNo(reader, "是否 dry-run？", false)
 	rate := readFloat(reader, "请求速率 [2]", 2)
 	timeout := readDuration(reader, "超时 [15s]", 15*time.Second)
 	submitRetries := readInt(reader, "提交 403 重试次数 [3]", 3)

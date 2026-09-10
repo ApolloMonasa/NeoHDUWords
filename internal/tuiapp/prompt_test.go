@@ -59,16 +59,3 @@ func TestReadDuration(t *testing.T) {
 		t.Fatalf("expected 5m, got %v", got)
 	}
 }
-
-func TestPromptYesNoWithReader(t *testing.T) {
-	r := newTestReader("\ny\nn\n")
-	if !promptYesNoWithReader(r, "q", true) {
-		t.Fatal("empty input should return default true")
-	}
-	if !promptYesNoWithReader(r, "q", false) {
-		t.Fatal("y should be true")
-	}
-	if promptYesNoWithReader(r, "q", true) {
-		t.Fatal("n should be false")
-	}
-}

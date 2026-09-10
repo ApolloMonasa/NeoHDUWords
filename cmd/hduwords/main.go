@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -21,6 +20,7 @@ import (
 	"hduwords/internal/store"
 	"hduwords/internal/tokenpool"
 	"hduwords/internal/updatecheck"
+	"hduwords/internal/updater"
 )
 
 const defaultUpdateRepo = "ApolloMonasa/NeoHDUWords"
@@ -135,79 +135,19 @@ func updateCmd(args []string) {
 		fatalErr(err)
 	}
 
-	startDir, err := os.Getwd()
-	if err != nil {
+	if _, err := updater.Run(context.Background(), updater.Options{
+		Repo:       repo,
+		BinaryName: "cli",
+		UpdatesDir: *updatesDirFlag,
+		Reader:     bufio.NewReader(os.Stdin),
+		AutoYes:    *yesFlag,
+		CheckOnly:  *checkOnlyFlag,
+		ApplyArgs: func(source, target string) []string {
+			return []string{"apply-update", "--source", source, "--target", target}
+		},
+	}); err != nil {
 		fatalErr(err)
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	status, err := updatecheck.Check(ctx, repo, startDir)
-	if err != nil {
-		fatalErr(err)
-	}
-
-	showUpdateStatusCLI(status)
-	if !status.Available {
-		fmt.Println("已是最新版本")
-		return
-	}
-	if *checkOnlyFlag {
-		fmt.Println("检测到有更新（check-only）")
-		return
-	}
-
-	if !*yesFlag && !promptYesNoCLI("检测到更新，是否下载并安装？", false) {
-		fmt.Println("已取消更新")
-		return
-	}
-
-	releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 20*time.Second)
-	release, err := updatecheck.LatestRelease(releaseCtx, repo)
-	releaseCancel()
-	if err != nil {
-		fatalErr(err)
-	}
-
-	asset, ok := release.AssetForCurrentPlatform("cli")
-	if !ok {
-		fatalf("最新发行版 %s 没有匹配当前平台的 cli 资产", release.TagName)
-	}
-
-	downloadDir := strings.TrimSpace(*updatesDirFlag)
-	if downloadDir == "" {
-		downloadDir = ".updates"
-	}
-	if err := os.MkdirAll(downloadDir, 0o755); err != nil {
-		fatalErr(err)
-	}
-
-	dest := filepath.Join(downloadDir, asset.Name)
-	if abs, err := filepath.Abs(dest); err == nil {
-		dest = abs
-	}
-	written, err := updatecheck.DownloadAsset(context.Background(), asset, dest)
-	if err != nil {
-		fatalErr(err)
-	}
-	fmt.Printf("更新包已下载：%s (%d bytes)\n", dest, written)
-
-	if verr := updatecheck.VerifyAssetChecksum(context.Background(), release, asset.Name, dest); verr != nil {
-		if errors.Is(verr, updatecheck.ErrNoSumsAsset) {
-			fmt.Println("当前发行版未提供 SHA256SUMS，跳过完整性校验")
-		} else if errors.Is(verr, updatecheck.ErrAssetNotInSums) {
-			fmt.Printf("警告：%v，跳过完整性校验\n", verr)
-		} else {
-			fatalErr(fmt.Errorf("更新包完整性校验失败: %w", verr))
-		}
-	} else {
-		fmt.Println("更新包完整性校验通过")
-	}
-
-	if err := installSelfUpdateCLI(dest); err != nil {
-		fatalErr(err)
-	}
-	fmt.Println("更新已启动安装，程序将退出。")
 }
 
 func applyUpdateCmd(args []string) {
@@ -224,81 +164,6 @@ func applyUpdateCmd(args []string) {
 	if err := updatecheck.InstallBinary(*sourcePath, *targetPath); err != nil {
 		fatalErr(err)
 	}
-}
-
-func installSelfUpdateCLI(sourcePath string) error {
-	selfExe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	helperDir, err := os.MkdirTemp("", "hduwords-updater-*")
-	if err != nil {
-		return err
-	}
-	helperPath := filepath.Join(helperDir, filepath.Base(selfExe))
-	if err := copyLocalFileCLI(selfExe, helperPath); err != nil {
-		return err
-	}
-	cmd := exec.Command(helperPath, "apply-update", "--source", sourcePath, "--target", selfExe)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Start()
-}
-
-func copyLocalFileCLI(srcPath, dstPath string) error {
-	input, err := os.ReadFile(srcPath)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dstPath, input, 0o755)
-}
-
-func promptYesNoCLI(prompt string, defaultYes bool) bool {
-	defaultLabel := "y/N"
-	if defaultYes {
-		defaultLabel = "Y/n"
-	}
-	fmt.Printf("%s [%s]: ", prompt, defaultLabel)
-	reader := bufio.NewReader(os.Stdin)
-	line, _ := reader.ReadString('\n')
-	line = strings.ToLower(strings.TrimSpace(line))
-	if line == "" {
-		return defaultYes
-	}
-	return line == "y" || line == "yes" || line == "1" || line == "true"
-}
-
-func showUpdateStatusCLI(status updatecheck.Status) {
-	if status.LocalVersion != "" {
-		if status.LocalSHA != "" {
-			fmt.Printf("当前版本：%s (%s)\n", status.LocalVersion, shortSHACLI(status.LocalSHA))
-		} else {
-			fmt.Printf("当前版本：%s\n", status.LocalVersion)
-		}
-	} else if status.LocalSHA == "" {
-		fmt.Println("当前版本：无法读取本地 Git 信息")
-	} else {
-		fmt.Printf("当前版本：%s (%s)\n", shortSHACLI(status.LocalSHA), status.LocalBranch)
-	}
-	if status.RemoteSHA == "" {
-		fmt.Println("远端版本：无法获取")
-		return
-	}
-	fmt.Printf("远端版本：%s (%s)\n", shortSHACLI(status.RemoteSHA), status.RemoteBranch)
-	if status.Available {
-		fmt.Println("状态：有更新")
-	} else {
-		fmt.Println("状态：已是最新")
-	}
-}
-
-func shortSHACLI(sha string) string {
-	sha = strings.TrimSpace(sha)
-	if len(sha) > 7 {
-		return sha[:7]
-	}
-	return sha
 }
 
 func runExamCmd(args []string) {
