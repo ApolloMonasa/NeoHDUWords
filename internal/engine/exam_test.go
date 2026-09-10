@@ -17,13 +17,14 @@ import (
 
 // examMock 模拟考试所需的四个平台端点，记录 save 请求与建卷次数。
 type examMock struct {
-	mu        sync.Mutex
-	t         *testing.T
-	questions []sklclient.Question
-	answers   map[string]string // title -> 官方正确答案（A/B/C/D）
-	newCount  int
-	failSave  map[string]bool
-	saves     []saveRecord
+	mu         sync.Mutex
+	t          *testing.T
+	questions  []sklclient.Question
+	answers    map[string]string // title -> 官方正确答案（A/B/C/D）
+	newCount   int
+	failSave   map[string]bool // paperID -> save 返回 403
+	failDetail map[string]bool // paperID -> detail 返回 403
+	saves      []saveRecord
 }
 
 func (m *examMock) handler() http.Handler {
@@ -47,6 +48,11 @@ func (m *examMock) handler() http.Handler {
 		id := r.URL.Query().Get("paperId")
 		m.mu.Lock()
 		defer m.mu.Unlock()
+		if m.failDetail != nil && m.failDetail[id] {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 1, "msg": "forbidden"})
+			return
+		}
 		list := make([]sklclient.Question, 0, len(m.questions))
 		for _, q := range m.questions {
 			qc := q
@@ -221,5 +227,65 @@ func TestRunExam_Save403RecreatesPaper(t *testing.T) {
 	}
 	if len(m.saves) != 2 || m.saves[0].PaperID != "p2" || m.saves[1].PaperID != "p2" {
 		t.Fatalf("expected save+submit on recreated paper p2, got %+v", m.saves)
+	}
+}
+
+func TestRunExam_Detail403RecreatesPaper(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+	if _, _, err := st.UpsertAnswer(ctx, "q1", []string{"a", "b", "c", "d"}, "a", "seed"); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &examMock{
+		t:          t,
+		questions:  []sklclient.Question{knownQuestion("q1")},
+		answers:    map[string]string{"q1": "A"},
+		failDetail: map[string]bool{"p1": true},
+	}
+	if err := runExamAgainst(t, m, st, -1, false); err != nil {
+		t.Fatal(err)
+	}
+
+	if m.newCount != 2 {
+		t.Fatalf("expected 2 paper creations, got %d", m.newCount)
+	}
+	if len(m.saves) != 2 || m.saves[0].PaperID != "p2" || m.saves[1].PaperID != "p2" {
+		t.Fatalf("expected save+submit on recreated paper p2, got %+v", m.saves)
+	}
+}
+
+func TestRunExam_TargetScoreWithInsufficientAnswers(t *testing.T) {
+	// 3 题只有 1 题已知答案；目标 100 分时只能答对已知的那题，其余随机
+	st := openTestStore(t)
+	ctx := context.Background()
+	if _, _, err := st.UpsertAnswer(ctx, "q1", []string{"a", "b", "c", "d"}, "a", "seed"); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &examMock{
+		t:         t,
+		questions: []sklclient.Question{knownQuestion("q1"), knownQuestion("q2"), knownQuestion("q3")},
+		answers:   map[string]string{"q1": "A", "q2": "A", "q3": "A"},
+	}
+	if err := runExamAgainst(t, m, st, 100, false); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(m.saves) != 2 {
+		t.Fatalf("expected save+submit, got %+v", m.saves)
+	}
+	save := m.saves[0]
+	if len(save.List) != 3 {
+		t.Fatalf("expected 3 answers, got %+v", save.List)
+	}
+	right := 0
+	for _, q := range save.List {
+		if q.Right != nil && *q.Right {
+			right++
+		}
+	}
+	if right != 1 {
+		t.Fatalf("expected exactly 1 correct (only known answer), got %d", right)
 	}
 }

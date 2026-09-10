@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -107,6 +108,29 @@ func NewFromTokenURL(raw string, opt Options) (*Client, error) {
 		ua:          ua,
 		minInterval: time.Duration(float64(time.Second) / maxRPS),
 	}, nil
+}
+
+// authErrPatterns 是判定"凭证失效/未登录"的错误特征（基于平台报错文案观测归纳，
+// 若平台文案变化可按需扩充）。
+var authErrPatterns = []string{"token", "未登录", "登录过期", "身份", "鉴权", "认证"}
+
+// IsAuthError 判断 err 是否表明登录凭证已失效，需要重新 login。
+// 命中时调用方应停止重试并提示用户重新登录，而不是继续冷却循环。
+func IsAuthError(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	if apiErr.StatusCode == 401 {
+		return true
+	}
+	msg := strings.ToLower(apiErr.Msg)
+	for _, p := range authErrPatterns {
+		if strings.Contains(msg, strings.ToLower(p)) {
+			return true
+		}
+	}
+	return false
 }
 
 type APIError struct {

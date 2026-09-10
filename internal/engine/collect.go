@@ -73,10 +73,20 @@ func RunCollectPool(ctx context.Context, opts CollectPoolOptions) {
 		}(spec)
 	}
 
-	<-ctx.Done()
-	log(LevelInfo, "收到退出信号，等待 worker 结束")
-	wg.Wait()
-	log(LevelInfo, "收集结束")
+	workersDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(workersDone)
+	}()
+	select {
+	case <-ctx.Done():
+		log(LevelInfo, "收到退出信号，等待 worker 结束")
+		<-workersDone
+		log(LevelInfo, "收集结束")
+	case <-workersDone:
+		// 所有 worker 自行退出（如凭证失效），无需等待取消信号
+		log(LevelInfo, "全部 worker 已退出，收集结束")
+	}
 }
 
 func runCollectLoop(ctx context.Context, workerTag string, cl *sklclient.Client, st *store.Store, paperType int, cooldown time.Duration, retryCfg SubmitRetryConfig, log LogFunc) {
@@ -91,6 +101,10 @@ func runCollectLoop(ctx context.Context, workerTag string, cl *sklclient.Client,
 		log(LevelRound, "[%s] 第 %d 轮开始", workerTag, round)
 		err := runCollectRound(ctx, workerTag, cl, st, paperType, retryCfg, log)
 		if err != nil {
+			if sklclient.IsAuthError(err) {
+				log(LevelError, "[%s] 登录凭证可能已失效，请重新执行 login 后再收集；本 worker 退出（%v）", workerTag, err)
+				return
+			}
 			var apiErr *sklclient.APIError
 			waitTime := cooldown
 			errText := err.Error()

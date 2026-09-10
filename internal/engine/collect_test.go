@@ -230,6 +230,91 @@ func TestRunCollectPool_ReturnsOnContextCancel(t *testing.T) {
 	}
 }
 
+func TestRunCollectPool_WorkerExitsOnAuthError(t *testing.T) {
+	st := openTestStore(t)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/paper/list", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]sklclient.PaperSummary{})
+	})
+	mux.HandleFunc("/api/paper/new", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 1, "msg": "token已失效，请重新登录"})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	cl := newTestClient(t, srv)
+
+	// ctx 永不取消：worker 识别凭证失效自行退出后，RunCollectPool 也必须返回
+	start := time.Now()
+	RunCollectPool(context.Background(), CollectPoolOptions{
+		Workers:  []WorkerSpec{{Tag: "w01", Client: cl}},
+		Store:    st,
+		Cooldown: 10 * time.Millisecond,
+		Retry:    SubmitRetryConfig{MaxRetries: 1, Interval: time.Millisecond},
+		Log:      testLogger(t),
+	})
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("RunCollectPool did not return after auth failure: %v", elapsed)
+	}
+}
+
+func TestRunCollectRound_FallbackToActivePaper(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	if _, _, err := st.UpsertAnswer(ctx, "q1", []string{"a", "b", "c", "d"}, "a", "seed"); err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	var saves []string
+
+	mux := http.NewServeMux()
+	// 新建试卷持续失败（非限频错误），应回退到列表中的活跃试卷
+	mux.HandleFunc("/api/paper/new", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 1, "msg": "not allowed now"})
+	})
+	mux.HandleFunc("/api/paper/list", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]sklclient.PaperSummary{{PaperID: "active-1", Week: 3}})
+	})
+	mux.HandleFunc("/api/paper/detail", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(sklclient.PaperDetail{
+			PaperID: "active-1",
+			List: []sklclient.Question{
+				{PaperDetailID: "d1", Title: "q1", AnswerA: "a", AnswerB: "b", AnswerC: "c", AnswerD: "d", Answer: "A", Input: "A"},
+			},
+		})
+	})
+	mux.HandleFunc("/api/paper/save", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		var rec saveRecord
+		_ = json.Unmarshal(b, &rec)
+		mu.Lock()
+		defer mu.Unlock()
+		if len(rec.List) == 0 {
+			saves = append(saves, rec.PaperID+"#submit")
+		} else {
+			saves = append(saves, rec.PaperID+"#save")
+		}
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	cl := newTestClient(t, srv)
+
+	err := runCollectRound(ctx, "w01", cl, st, PaperTypePractice,
+		SubmitRetryConfig{MaxRetries: 1, Interval: time.Millisecond}.Normalized(), testLogger(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(saves) != 2 || saves[0] != "active-1#save" || saves[1] != "active-1#submit" {
+		t.Fatalf("expected save/submit on active paper, got %v", saves)
+	}
+}
+
 func TestBuildWorkers_PoolPriorityAndCap(t *testing.T) {
 	log := func(level, format string, args ...any) {}
 

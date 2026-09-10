@@ -250,13 +250,18 @@ func buildExamSubmission(ctx context.Context, opts ExamOptions, detail sklclient
 	return submission, hit, miss, nil
 }
 
+// chooseWrongChoice 从错误选项中随机挑一个，避免控分时答错规律固定。
 func chooseWrongChoice(correct string, options []string) string {
+	var wrongs []string
 	for _, opt := range options {
 		if opt != "" && opt != correct {
-			return opt
+			wrongs = append(wrongs, opt)
 		}
 	}
-	return ""
+	if len(wrongs) == 0 {
+		return ""
+	}
+	return wrongs[rand.IntN(len(wrongs))]
 }
 
 func indexOf(options []string, target string) int {
