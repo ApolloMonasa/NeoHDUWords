@@ -42,7 +42,3 @@ type Question struct {
 func (q Question) Options() []string {
 	return []string{q.AnswerA, q.AnswerB, q.AnswerC, q.AnswerD}
 }
-
-type SaveInput struct {
-	Question
-}

@@ -61,19 +61,20 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `cli - HDU 我爱记单词 CLI
+	name := filepath.Base(os.Args[0])
+	fmt.Fprintf(os.Stderr, `%[1]s - HDU 我爱记单词 CLI
 
 Usage:
-	hduwords login    [--browser chrome|edge]
-	hduwords addtoken [--browser chrome|edge]
-	hduwords listtokens [--pool-file .tokens] [--show-plain]
-	hduwords setprimary [--token <token>] [--pool-file .tokens] [--sync-login=true]
-	hduwords collect [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--ua <ua>] [--cooldown 5m] [--pool-file .tokens] [--workers 0] [--submit-retries 3] [--submit-retry-interval 10s]
-	hduwords exam    [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--time 30s] [--score 100] [--dry-run] [--submit-retries 3] [--submit-retry-interval 10s]
-	hduwords update  [--repo owner/name] [--updates-dir .updates] [--yes] [--check-only]
-	hduwords db stats --db <path>
-	hduwords db export --db <path> [--format json|markdown] [--out <file>]
-	hduwords db update [--out <file>]
+	%[1]s login    [--browser chrome|edge]
+	%[1]s addtoken [--browser chrome|edge]
+	%[1]s listtokens [--pool-file .tokens] [--show-plain]
+	%[1]s setprimary [--token <token>] [--pool-file .tokens] [--sync-login=true]
+	%[1]s collect [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--ua <ua>] [--cooldown 5m] [--pool-file .tokens] [--workers 0] [--submit-retries 3] [--submit-retry-interval 10s]
+	%[1]s exam    [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--time 30s] [--score 100] [--dry-run] [--submit-retries 3] [--submit-retry-interval 10s]
+	%[1]s update  [--repo owner/name] [--updates-dir .updates] [--yes] [--check-only]
+	%[1]s db stats --db <path>
+	%[1]s db export --db <path> [--format json|markdown] [--out <file>]
+	%[1]s db update [--out <file>]
 
 Commands:
 	login      自动打开浏览器，完成统一身份认证后后台自动捕获 Token 并保存至本地
@@ -92,8 +93,8 @@ Options:
 		--browser            浏览器种类: chrome|edge（留空自动检测，优先级 Chrome→Edge）
 
 	Common:
-		--url                如不提供，则默认从 'hduwords login' 生成的本地 .token 文件中读取。也可手动提供带有 token 的网址
-		--db                 数据库路径，默认 hduwords.db
+		--url                如不提供，则默认从 '%[1]s login' 生成的本地 .token 文件中读取。也可手动提供带有 token 的网址
+		--db                 数据库路径，默认当前目录下的 hduwords.db
 		--rate               请求速率，默认 2
 		--timeout            请求超时，默认 15s
 		--ua                 自定义 UA；默认是真实浏览器风格的 Windows Chrome UA（exam 模式会强制覆盖为移动端 UA）
@@ -115,7 +116,7 @@ Options:
 		--updates-dir        更新包下载目录，默认 .updates
 		--yes                跳过确认，直接安装
 		--check-only         只检查是否有更新，不安装
-`)
+`, name)
 }
 
 func updateCmd(args []string) {
@@ -367,7 +368,8 @@ func collectLog(level, format string, args ...any) {
 	if collectUseColor {
 		line = colorizeCollectLine(level, line)
 	}
-	log.Println(line)
+	// 进度日志走 stdout；错误输出由 fatalf/fatalErr 走 stderr
+	fmt.Println(line)
 }
 
 func colorizeCollectLine(level, line string) string {
@@ -466,24 +468,17 @@ func dbCmd(args []string) {
 func dbUpdateCmd(args []string) {
 	fs := flag.NewFlagSet("db update", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	outFile := fs.String("out", "", "output file path (default next to executable)")
+	outFile := fs.String("out", "", "output file path (default hduwords.db in current directory)")
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
 
 	dest := strings.TrimSpace(*outFile)
 	if dest == "" {
-		exe, err := os.Executable()
-		if err != nil {
-			exe = "hduwords"
-		}
-		dest = filepath.Join(filepath.Dir(exe), "hduwords.db")
+		dest = "hduwords.db"
 	}
 
-	asset := updatecheck.ReleaseAsset{
-		Name: "hduwords.db",
-		URL:  "https://github.com/ApolloMonasa/NeoHDUWords/releases/download/Data/hduwords.db",
-	}
+	asset := updatecheck.DBAsset()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()

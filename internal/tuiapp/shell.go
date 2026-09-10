@@ -5,7 +5,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -196,7 +195,8 @@ func collectLog(level, format string, args ...any) {
 	if collectUseColor {
 		line = colorizeCollectLine(level, line)
 	}
-	log.Println(line)
+	// 进度日志统一走 stdout，避免与 fmt 输出交错
+	fmt.Println(line)
 }
 
 func colorizeCollectLine(level, line string) string {

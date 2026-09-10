@@ -42,10 +42,6 @@ func (r Repo) URL() string {
 	return fmt.Sprintf("https://github.com/%s/%s", r.Owner, r.Name)
 }
 
-func (r Repo) ZipURL(ref string) string {
-	return fmt.Sprintf("https://github.com/%s/%s/archive/%s.zip", r.Owner, r.Name, ref)
-}
-
 func Check(ctx context.Context, repo Repo, startDir string) (Status, error) {
 	localVersion := strings.TrimSpace(buildinfo.Version)
 	localCommit := strings.TrimSpace(buildinfo.Commit)
@@ -94,43 +90,6 @@ func Check(ctx context.Context, repo Repo, startDir string) (Status, error) {
 		RepoURL:      repo.URL(),
 		Available:    available,
 	}, nil
-}
-
-func DownloadSnapshot(ctx context.Context, repo Repo, ref, destPath string) (int64, error) {
-	if strings.TrimSpace(ref) == "" {
-		return 0, errors.New("empty ref")
-	}
-	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
-		return 0, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, repo.ZipURL(ref), nil)
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("User-Agent", "HDU-Words-CLI")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return 0, fmt.Errorf("download snapshot: http=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
-	f, err := os.Create(destPath)
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-
-	written, err := io.Copy(f, resp.Body)
-	if err != nil {
-		return written, err
-	}
-	return written, nil
 }
 
 type gitRemoteInfo struct {

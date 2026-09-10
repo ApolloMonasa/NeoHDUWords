@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -228,15 +227,4 @@ func (c *Client) rateLimit(ctx context.Context) error {
 		c.lastRequest = time.Now()
 		return nil
 	}
-}
-
-func (c *Client) mustValues(kv ...string) (url.Values, error) {
-	if len(kv)%2 != 0 {
-		return nil, errors.New("mustValues expects even kv length")
-	}
-	v := url.Values{}
-	for i := 0; i < len(kv); i += 2 {
-		v.Set(kv[i], kv[i+1])
-	}
-	return v, nil
 }

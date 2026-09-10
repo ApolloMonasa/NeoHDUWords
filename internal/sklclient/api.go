@@ -81,6 +81,8 @@ func (c *Client) PaperSave(ctx context.Context, paperID string, list []Question)
 	return c.do(ctx, "POST", "/api/paper/save", q, req, nil)
 }
 
+// PaperSubmit 交卷。平台没有独立的 submit 端点，
+// 实际是向 /api/paper/save 提交空题目列表触发交卷。
 func (c *Client) PaperSubmit(ctx context.Context, paperID string) error {
 	req := paperSaveReq{
 		PaperID: paperID,

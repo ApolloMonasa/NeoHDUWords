@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -331,16 +330,8 @@ func runDBExportDirect(reader *bufio.Reader, markdown bool) {
 }
 
 func runDBUpdateDirect() {
-	exe, err := os.Executable()
-	if err != nil {
-		exe = "hduwords"
-	}
-	dest := filepath.Join(filepath.Dir(exe), "hduwords.db")
-
-	asset := updatecheck.ReleaseAsset{
-		Name: "hduwords.db",
-		URL:  "https://github.com/ApolloMonasa/NeoHDUWords/releases/download/Data/hduwords.db",
-	}
+	dest := "hduwords.db"
+	asset := updatecheck.DBAsset()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()

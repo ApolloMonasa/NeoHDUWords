@@ -66,6 +66,14 @@ func LatestRelease(ctx context.Context, repo Repo) (Release, error) {
 	return out, nil
 }
 
+// DBAsset 返回默认发布仓库（Data tag）下的题库数据库资产。
+func DBAsset() ReleaseAsset {
+	return ReleaseAsset{
+		Name: "hduwords.db",
+		URL:  "https://github.com/ApolloMonasa/NeoHDUWords/releases/download/Data/hduwords.db",
+	}
+}
+
 func (r Release) AssetForCurrentPlatform(binaryName string) (ReleaseAsset, bool) {
 	goos := strings.ToLower(runtime.GOOS)
 	goarch := strings.ToLower(runtime.GOARCH)

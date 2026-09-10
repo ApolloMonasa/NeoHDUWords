@@ -6,8 +6,9 @@
 *.exe~
 .token
 .tokens
-docs
-tui
-cli
-hduwords
+docs/
+/tui
+/cli
+/hduwords
+.updates/
 .zcode/
