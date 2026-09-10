@@ -6,6 +6,8 @@
 *.exe~
 .token
 .tokens
+accounts.json
+accounts.json.tmp
 docs/
 /tui
 /cli

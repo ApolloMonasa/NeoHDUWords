@@ -65,11 +65,11 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `%[1]s - HDU 我爱记单词 CLI
 
 Usage:
-	%[1]s login    [--browser chrome|edge]
-	%[1]s addtoken [--browser chrome|edge]
-	%[1]s listtokens [--pool-file .tokens] [--show-plain]
-	%[1]s setprimary [--token <token>] [--pool-file .tokens] [--sync-login=true]
-	%[1]s collect [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--ua <ua>] [--cooldown 5m] [--pool-file .tokens] [--workers 0] [--submit-retries 3] [--submit-retry-interval 10s]
+	%[1]s login    [--browser chrome|edge] [--alias <name>]
+	%[1]s addtoken [--browser chrome|edge] [--alias <name>]
+	%[1]s listtokens [--accounts accounts.json] [--show-plain]
+	%[1]s setprimary --token <token> [--accounts accounts.json]
+	%[1]s collect [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--ua <ua>] [--cooldown 5m] [--accounts accounts.json] [--workers 0] [--submit-retries 3] [--submit-retry-interval 10s]
 	%[1]s exam    [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--time 30s] [--score 100] [--dry-run] [--submit-retries 3] [--submit-retry-interval 10s]
 	%[1]s update  [--repo owner/name] [--updates-dir .updates] [--yes] [--check-only]
 	%[1]s db stats --db <path>
@@ -77,10 +77,10 @@ Usage:
 	%[1]s db update [--out <file>]
 
 Commands:
-	login      自动打开浏览器，完成统一身份认证后后台自动捕获 Token 并保存至本地
-	addtoken   自动打开浏览器，登录后将 token 追加写入 .tokens（用于 collect 多账号并发）
-	listtokens 查看 .token 与 .tokens 的账号列表及 primary 标识
-	setprimary 设置 .tokens 的 primary 标识；默认同步到 .token 供 exam 使用
+	login      自动打开浏览器，完成统一身份认证后捕获凭证，写入凭证库并设为主账号
+	addtoken   自动打开浏览器，登录后把凭证追加写入凭证库（用于 collect 多账号并发）
+	listtokens 查看凭证库账号列表及主账号标识
+	setprimary 设置凭证库的主账号，exam 默认使用该账号
 	collect    收集题库：支持 token 池并发采集；收集与练习统一使用 type=0
 	exam       正式自动考试：基于本地题库进行正式考试作答
 	update     检查并安装最新 CLI 发行版（二进制更新）
@@ -93,7 +93,7 @@ Options:
 		--browser            浏览器种类: chrome|edge（留空自动检测，优先级 Chrome→Edge）
 
 	Common:
-		--url                如不提供，则默认从 '%[1]s login' 生成的本地 .token 文件中读取。也可手动提供带有 token 的网址
+		--url                如不提供，则默认从 '%[1]s login' 生成的凭证库（accounts.json）主账号中读取。也可手动提供带有 token 的网址
 		--db                 数据库路径，默认当前目录下的 hduwords.db
 		--rate               请求速率，默认 2
 		--timeout            请求超时，默认 15s
@@ -108,7 +108,7 @@ Options:
 
 	Collect only:
 		--cooldown           每轮冷却时间，默认 5m
-		--pool-file          token 池文件，默认 .tokens
+		--accounts           凭证库文件，默认 accounts.json
 		--workers            并发 worker 数，默认自动
 
 	Update only:
@@ -415,7 +415,7 @@ func collectCmd(args []string) {
 		timeout        = fs.Duration("timeout", 15*time.Second, "http timeout")
 		ua             = fs.String("ua", sklclient.DefaultUserAgent, "user-agent")
 		cooldown       = fs.Duration("cooldown", 5*time.Minute, "cooldown between rounds")
-		poolFile       = fs.String("pool-file", tokenpool.DefaultPoolFile, "token pool file path")
+		accounts       = fs.String("accounts", tokenpool.DefaultAccountsFile, "accounts store file path")
 		workers        = fs.Int("workers", 0, "collect workers: 0=auto (pool size, or 1 when pool empty), >0=min(n, available tokens)")
 		submitRetries  = fs.Int("submit-retries", 3, "retry count for 403 on save/submit before creating new paper")
 		submitRetryInt = fs.Duration("submit-retry-interval", 10*time.Second, "wait duration between 403 retries on save/submit")
@@ -437,12 +437,13 @@ func collectCmd(args []string) {
 
 	retryCfg := engine.SubmitRetryConfig{MaxRetries: *submitRetries, Interval: *submitRetryInt}.Normalized()
 
-	pool, err := tokenpool.Load(*poolFile)
+	acctStore, err := tokenpool.LoadStore(*accounts)
 	if err != nil {
-		fatalErr(fmt.Errorf("load token pool: %w", err))
+		fatalErr(fmt.Errorf("load accounts store: %w", err))
 	}
+	notifyMigrated(acctStore)
 
-	workerSpecs := engine.BuildWorkers(pool.Tokens, getFinalTokenURL(*rawURL), *workers, sklclient.Options{
+	workerSpecs := engine.BuildWorkers(acctStore.Tokens(), getFinalTokenURL(*rawURL), *workers, sklclient.Options{
 		BaseUserAgent: *ua,
 		Timeout:       *timeout,
 		MaxRPS:        *rate,
