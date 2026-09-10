@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"math/rand/v2"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -302,7 +301,6 @@ func runExamCmd(args []string) {
 		examTime       = fs.Duration("time", 0, "wait before submitting")
 		examScore      = fs.Int("score", -1, "target score percentage 0-100")
 		dryRun         = fs.Bool("dry-run", false, "print decisions without submitting")
-		unknownPolicy  = fs.String("unknown-policy", "random", "abort|skip|random")
 		submitRetries  = fs.Int("submit-retries", 3, "retry count for 403 on save/submit before creating new paper")
 		submitRetryInt = fs.Duration("submit-retry-interval", 10*time.Second, "wait duration between 403 retries on save/submit")
 	)
@@ -311,30 +309,15 @@ func runExamCmd(args []string) {
 		os.Exit(2)
 	}
 
-	paperType := 1
+	// exam 模式强制移动端 UA
 	*ua = sklclient.ExamMobileUserAgent
 
 	finalURL := getFinalTokenURL(*rawURL)
-
-	policy, err := parseUnknownPolicy(*unknownPolicy)
-	if err != nil {
-		fatalErr(err)
-	}
-	if policy != unknownRandom {
-		collectLog("WARN", "exam 模式未知题策略强制 random (忽略 --unknown-policy=%s)", *unknownPolicy)
-		policy = unknownRandom
-	}
 	retryCfg := engine.SubmitRetryConfig{MaxRetries: *submitRetries, Interval: *submitRetryInt}.Normalized()
 
-	collectLog("INFO", "exam 模式启动: type=%d db=%s dryRun=%v submitRetries=%d retryInterval=%v", paperType, *dbPath, *dryRun, retryCfg.MaxRetries, retryCfg.Interval)
+	collectLog("INFO", "exam 模式启动: type=%d db=%s dryRun=%v submitRetries=%d retryInterval=%v",
+		engine.PaperTypeExam, *dbPath, *dryRun, retryCfg.MaxRetries, retryCfg.Interval)
 	collectLog("INFO", "exam 参数: time=%v score=%d", *examTime, *examScore)
-
-	contextTimeout := *examTime + 15*time.Minute
-	if contextTimeout < 20*time.Minute {
-		contextTimeout = 20 * time.Minute
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
-	defer cancel()
 
 	st, err := store.Open(*dbPath)
 	if err != nil {
@@ -351,227 +334,17 @@ func runExamCmd(args []string) {
 		fatalErr(err)
 	}
 
-	var retryPaper *sklclient.Paper
-	for attempt := 0; attempt < 2; attempt++ {
-		var paper sklclient.Paper
-		if retryPaper != nil {
-			paper = *retryPaper
-			retryPaper = nil
-		} else {
-			paper, err = cl.CreateExamPaper(ctx, paperType)
-		}
-		if err != nil {
-			fatalErr(fmt.Errorf("CreateExamPaper(exam): %w", err))
-		}
-
-		detail, err := cl.PaperDetail(ctx, paper.PaperID)
-		if err != nil {
-			if attempt == 0 && engine.IsForbiddenAPIError(err) {
-				collectLog("WARN", "PaperDetail 返回 403，尝试新建试卷重试")
-				paper, err = cl.CreateExamPaper(ctx, paperType)
-				if err != nil {
-					fatalErr(err)
-				}
-				tmp := paper
-				retryPaper = &tmp
-				continue
-			}
-			fatalErr(err)
-		}
-
-		targetCorrect := -1
-		correctAssigned := 0
-		if *examScore >= 0 {
-			if *examScore > 100 {
-				fatalf("--score must be between 0 and 100")
-			}
-			targetCorrect = (len(detail.List)*(*examScore) + 50) / 100
-			if targetCorrect > len(detail.List) {
-				targetCorrect = len(detail.List)
-			}
-			collectLog("INFO", "exam 目标得分=%d%%，目标正确题数=%d/%d", *examScore, targetCorrect, len(detail.List))
-		}
-
-		submission := make([]sklclient.Question, 0, len(detail.List))
-		hit, miss := 0, 0
-		for _, q := range detail.List {
-			stem := q.Title
-			opts := q.Options()
-
-			var input string
-			correctText, ok, err := st.FindAnswerText(ctx, stem, opts)
-			if err != nil {
-				fatalErr(err)
-			}
-			if *examScore >= 0 {
-				useCorrect := ok && correctAssigned < targetCorrect
-				if useCorrect {
-					idx := -1
-					for j, opt := range opts {
-						if opt == correctText {
-							idx = j
-							break
-						}
-					}
-					if idx != -1 {
-						hit++
-						correctAssigned++
-						input = sklclient.IndexToChoice(idx)
-						q.Input = input
-						t := true
-						q.Right = &t
-						q.Answer = input
-					} else {
-						miss++
-						input = chooseWrongChoice(correctText, opts)
-						q.Input = input
-						f := false
-						q.Right = &f
-					}
-				} else {
-					miss++
-					input = chooseWrongChoice(correctText, opts)
-					q.Input = input
-					f := false
-					q.Right = &f
-				}
-			} else if ok {
-				idx := -1
-				for j, opt := range opts {
-					if opt == correctText {
-						idx = j
-						break
-					}
-				}
-				if idx != -1 {
-					hit++
-					input = sklclient.IndexToChoice(idx)
-					q.Input = input
-					t := true
-					q.Right = &t
-					q.Answer = input
-				} else {
-					miss++
-				}
-			} else {
-				miss++
-			}
-
-			if !ok || input == "" {
-				switch policy {
-				case unknownAbort:
-					fatalf("unknown question (no db match): %q", stem)
-				case unknownSkip:
-					input = ""
-					q.Input = input
-					f := false
-					q.Right = &f
-				case unknownRandom:
-					if len(opts) > 0 {
-						input = sklclient.IndexToChoice(rand.IntN(len(opts)))
-					} else {
-						input = ""
-					}
-					q.Input = input
-					f := false
-					q.Right = &f
-				default:
-					fatalf("unknown policy: %v", policy)
-				}
-			}
-
-			if !*dryRun && input != "" {
-				submission = append(submission, q)
-			}
-		}
-
-		if *examScore >= 0 {
-			collectLog("INFO", "exam 评分控制: 已保留正确=%d 目标正确=%d 总题=%d", correctAssigned, targetCorrect, len(detail.List))
-		}
-
-		collectLog("INFO", "试卷=%s 总题=%d 命中=%d 未命中=%d", paper.PaperID, len(detail.List), hit, miss)
-
-		if *dryRun {
-			collectLog("INFO", "dry-run 已开启，不提交答案")
-			return
-		}
-
-		if *examTime > 0 {
-			collectLog("INFO", "exam 模式进度条等待 %v 后交卷", *examTime)
-			if err := waitWithProgressBar(ctx, *examTime, "等待交卷"); err != nil {
-				fatalErr(err)
-			}
-		}
-
-		if len(submission) > 0 {
-			if err := engine.RetryForbiddenSubmit(ctx, "", "PaperSave", retryCfg, collectLog, func() error {
-				return cl.PaperSave(ctx, paper.PaperID, submission)
-			}); err != nil {
-				if attempt == 0 && engine.IsForbiddenAPIError(err) {
-					collectLog("WARN", "PaperSave 返回 403，尝试新建试卷重试")
-					newPaper, nerr := cl.CreateExamPaper(ctx, paperType)
-					if nerr != nil {
-						fatalErr(fmt.Errorf("PaperSave: %w; CreateExamPaper(retry): %w", err, nerr))
-					}
-					tmp := newPaper
-					retryPaper = &tmp
-					continue
-				}
-				fatalErr(err)
-			}
-		}
-
-		if err := engine.RetryForbiddenSubmit(ctx, "", "PaperSubmit", retryCfg, collectLog, func() error {
-			return cl.PaperSubmit(ctx, paper.PaperID)
-		}); err != nil {
-			if attempt == 0 && engine.IsForbiddenAPIError(err) {
-				collectLog("WARN", "PaperSubmit 返回 403，尝试新建试卷重试")
-				newPaper, nerr := cl.CreateExamPaper(ctx, paperType)
-				if nerr != nil {
-					fatalErr(fmt.Errorf("PaperSubmit: %w; CreateExamPaper(retry): %w", err, nerr))
-				}
-				tmp := newPaper
-				retryPaper = &tmp
-				continue
-			}
-			fatalErr(err)
-		}
-
-		res, err := cl.PaperDetail(ctx, paper.PaperID)
-		if err != nil {
-			fatalErr(err)
-		}
-
-		if ok, listErr := paperInList(ctx, cl, paper.PaperID, paperType); listErr != nil {
-			collectLog("WARN", "exam 结果校验失败: %v", listErr)
-		} else if !ok {
-			collectLog("WARN", "exam 试卷未出现在列表中: %s", paper.PaperID)
-		}
-
-		added, updated, skipped, err := engine.UpsertCollectedAnswers(ctx, st, res)
-		if err != nil {
-			fatalErr(err)
-		}
-		collectLog("OK", "题目回收: 试卷=%s 入库[新增=%d 更新=%d 跳过=%d]", res.PaperID, added, updated, skipped)
-
-		if res.EndTime != nil {
-			collectLog("OK", "提交完成: 得分=%d endTime=%s", res.Mark, res.EndTime.Format(time.RFC3339))
-		} else {
-			collectLog("OK", "提交完成: 得分=%d", res.Mark)
-		}
-		return
+	if err := engine.RunExam(context.Background(), engine.ExamOptions{
+		Client:           cl,
+		Store:            st,
+		WaitBeforeSubmit: *examTime,
+		TargetScore:      *examScore,
+		DryRun:           *dryRun,
+		Retry:            retryCfg,
+		Log:              collectLog,
+	}); err != nil {
+		fatalErr(err)
 	}
-
-	fatalf("执行失败：重试后仍未完成")
-}
-
-func chooseWrongChoice(correct string, options []string) string {
-	for _, opt := range options {
-		if opt != "" && opt != correct {
-			return opt
-		}
-	}
-	return ""
 }
 
 var collectUseColor = shouldUseColor()
@@ -671,67 +444,6 @@ func collectCmd(args []string) {
 		Retry:    retryCfg,
 		Log:      collectLog,
 	})
-}
-
-func paperInList(ctx context.Context, cl *sklclient.Client, paperID string, paperType int) (bool, error) {
-	list, err := cl.PaperList(ctx, paperType)
-	if err != nil {
-		return false, err
-	}
-	for _, item := range list {
-		if item.PaperID == paperID {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-func waitWithProgressBar(ctx context.Context, d time.Duration, label string) error {
-	if d <= 0 {
-		return nil
-	}
-	deadline := time.Now().Add(d)
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	renderProgressBar(label, d, d)
-	for {
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			fmt.Println()
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			fmt.Print("\n")
-			return ctx.Err()
-		case <-ticker.C:
-			elapsed := d - remaining
-			renderProgressBar(label, elapsed, d)
-		}
-	}
-}
-
-func renderProgressBar(label string, elapsed, total time.Duration) {
-	if total <= 0 {
-		total = time.Second
-	}
-	if elapsed < 0 {
-		elapsed = 0
-	}
-	if elapsed > total {
-		elapsed = total
-	}
-	const barWidth = 24
-	filled := int(float64(barWidth) * float64(elapsed) / float64(total))
-	if filled > barWidth {
-		filled = barWidth
-	}
-	percent := int(float64(elapsed) * 100 / float64(total))
-	if percent > 100 {
-		percent = 100
-	}
-	bar := strings.Repeat("#", filled) + strings.Repeat("-", barWidth-filled)
-	fmt.Printf("\r\x1b[2K%s [%s] %3d%%", label, bar, percent)
 }
 
 func dbCmd(args []string) {
@@ -919,28 +631,6 @@ func dbExportCmd(args []string) {
 		fatalf("unsupported format: %s", *format)
 	}
 }
-
-type unknownPolicy int
-
-const (
-	unknownAbort unknownPolicy = iota
-	unknownSkip
-	unknownRandom
-)
-
-func parseUnknownPolicy(s string) (unknownPolicy, error) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "abort":
-		return unknownAbort, nil
-	case "skip":
-		return unknownSkip, nil
-	case "random":
-		return unknownRandom, nil
-	default:
-		return 0, fmt.Errorf("invalid --unknown-policy: %q", s)
-	}
-}
-
 func fatalf(format string, args ...any) {
 	log.Printf("error: "+format, args...)
 	os.Exit(1)
