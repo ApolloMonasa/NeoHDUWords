@@ -1,4 +1,4 @@
-package main
+package engine
 
 import (
 	"context"
@@ -26,10 +26,11 @@ func TestCalcDynamicCooldown_ParsesLastApplyTime(t *testing.T) {
 
 func TestRetryForbiddenSubmit_SucceedsAfterRetries(t *testing.T) {
 	ctx := context.Background()
-	cfg := submitRetryConfig{MaxRetries: 3, Interval: time.Millisecond}.normalized()
+	cfg := SubmitRetryConfig{MaxRetries: 3, Interval: time.Millisecond}.Normalized()
+	noopLog := func(level, format string, args ...any) {}
 
 	attempts := 0
-	err := retryForbiddenSubmit(ctx, "", "PaperSubmit", cfg, func() error {
+	err := RetryForbiddenSubmit(ctx, "", "PaperSubmit", cfg, noopLog, func() error {
 		attempts++
 		if attempts <= 2 {
 			return &sklclient.APIError{StatusCode: 403, Endpoint: "POST /api/paper/save"}
@@ -46,10 +47,11 @@ func TestRetryForbiddenSubmit_SucceedsAfterRetries(t *testing.T) {
 
 func TestRetryForbiddenSubmit_NonForbiddenNoRetry(t *testing.T) {
 	ctx := context.Background()
-	cfg := submitRetryConfig{MaxRetries: 3, Interval: time.Millisecond}.normalized()
+	cfg := SubmitRetryConfig{MaxRetries: 3, Interval: time.Millisecond}.Normalized()
+	noopLog := func(level, format string, args ...any) {}
 
 	attempts := 0
-	err := retryForbiddenSubmit(ctx, "", "PaperSave", cfg, func() error {
+	err := RetryForbiddenSubmit(ctx, "", "PaperSave", cfg, noopLog, func() error {
 		attempts++
 		return &sklclient.APIError{StatusCode: 400, Endpoint: "POST /api/paper/save"}
 	})

@@ -3,7 +3,6 @@ package tuiapp
 import (
 	"bufio"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -15,14 +14,10 @@ import (
 	"time"
 
 	"hduwords/internal/buildinfo"
-	"hduwords/internal/sklclient"
-	"hduwords/internal/store"
 	"hduwords/internal/updatecheck"
 )
 
 const defaultTUIRepo = "ApolloMonasa/NeoHDUWords"
-const defaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-const examMobileUserAgent = "Mozilla/5.0 (Linux; Android 13; M2102J2SC Build/TKQ1.221114.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.0.0 Mobile Safari/537.36"
 
 var collectUseColor = shouldUseColor()
 
@@ -228,171 +223,6 @@ func shouldUseColor() bool {
 	}
 	term := strings.ToLower(strings.TrimSpace(os.Getenv("TERM")))
 	return term != "dumb"
-}
-
-func runCollectLoop(ctx context.Context, workerTag string, cl *sklclient.Client, st *store.Store, paperType int, cooldown time.Duration, retryCfg submitRetryConfig) {
-	round := 1
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		log.Println()
-		collectLog("ROUND", "[%s] 第 %d 轮开始", workerTag, round)
-		err := runCollectRound(ctx, workerTag, cl, st, paperType, retryCfg)
-		if err != nil {
-			var apiErr *sklclient.APIError
-			waitTime := cooldown
-			errText := err.Error()
-			shouldDynamicCooldown := strings.Contains(errText, "上次申请时间") || strings.Contains(errText, "短时间重试")
-			if errors.As(err, &apiErr) {
-				if apiErr.Code == 2 || strings.Contains(apiErr.Msg, "短时间重试") || strings.Contains(apiErr.Msg, "失败") {
-					shouldDynamicCooldown = true
-				}
-			}
-			if shouldDynamicCooldown {
-				waitTime = calcDynamicCooldown(errText, cooldown)
-				collectLog("WARN", "[%s] 频率限制或创建失败，动态冷却=%v，原因=%v", workerTag, waitTime, err)
-			} else {
-				collectLog("ERROR", "[%s] 本轮失败: %v", workerTag, err)
-			}
-			collectLog("INFO", "[%s] 冷却等待 %v", workerTag, waitTime)
-			if err := waitWithContext(ctx, waitTime); err != nil {
-				return
-			}
-		} else {
-			collectLog("OK", "[%s] 本轮完成，等待 %v 后进入下一轮", workerTag, cooldown)
-			if err := waitWithContext(ctx, cooldown); err != nil {
-				return
-			}
-		}
-		round++
-	}
-}
-
-func runCollectRound(ctx context.Context, workerTag string, cl *sklclient.Client, st *store.Store, paperType int, retryCfg submitRetryConfig) error {
-	paper, err := cl.CreateFreshPaper(ctx, paperType)
-	if err != nil {
-		var apiErr *sklclient.APIError
-		if errors.As(err, &apiErr) && (apiErr.Code == 2 || strings.Contains(apiErr.Msg, "短时间重试") || strings.Contains(apiErr.Msg, "上次申请时间")) {
-			return fmt.Errorf("PaperNew(fresh): %w", err)
-		}
-		collectLog("WARN", "[%s] 新建试卷失败，回退活跃试卷: %v", workerTag, err)
-		paper, err = cl.GetOrCreateActivePaper(ctx, paperType)
-		if err != nil {
-			return fmt.Errorf("GetOrCreateActivePaper(fallback): %w", err)
-		}
-	} else {
-		collectLog("INFO", "[%s] 已新建试卷: id=%s week=%d", workerTag, paper.PaperID, paper.Week)
-	}
-
-	var res sklclient.PaperDetail
-	for attempt := 0; attempt < 2; attempt++ {
-		detail, err := cl.PaperDetail(ctx, paper.PaperID)
-		if err != nil {
-			return fmt.Errorf("PaperDetail(fetch): %w", err)
-		}
-
-		submission := make([]sklclient.Question, 0, len(detail.List))
-		hit, miss := 0, 0
-		for _, q := range detail.List {
-			stem := q.Title
-			opts := q.Options()
-
-			var input string
-			correctText, ok, err := st.FindAnswerText(ctx, stem, opts)
-			if err != nil {
-				return fmt.Errorf("FindAnswerText: %w", err)
-			}
-
-			idx := -1
-			if ok {
-				for j, opt := range opts {
-					if opt == correctText {
-						idx = j
-						break
-					}
-				}
-			}
-
-			if idx != -1 {
-				hit++
-				input = sklclient.IndexToChoice(idx)
-				q.Input = input
-				t := true
-				q.Right = &t
-				q.Answer = input
-			} else {
-				miss++
-				input = ""
-				q.Input = input
-				f := false
-				q.Right = &f
-			}
-
-			if input != "" {
-				submission = append(submission, q)
-			}
-		}
-
-		collectLog("INFO", "[%s] 答题统计: 命中=%d 跳过=%d，准备交卷", workerTag, hit, miss)
-
-		if len(submission) > 0 {
-			if err := retryForbiddenSubmit(ctx, workerTag, "PaperSave", retryCfg, func() error {
-				return cl.PaperSave(ctx, paper.PaperID, submission)
-			}); err != nil {
-				if attempt == 0 && isForbiddenAPIError(err) {
-					collectLog("WARN", "[%s] PaperSave 返回 403，当前试卷可能失效，尝试新建试卷重试", workerTag)
-					newPaper, nerr := cl.CreateFreshPaper(ctx, paperType)
-					if nerr != nil {
-						return fmt.Errorf("PaperSave(submit): %w; PaperNew(retry): %w", err, nerr)
-					}
-					paper = newPaper
-					collectLog("INFO", "[%s] 重试改用新试卷: id=%s week=%d", workerTag, paper.PaperID, paper.Week)
-					continue
-				}
-				return fmt.Errorf("PaperSave(submit): %w", err)
-			}
-		}
-
-		if err := retryForbiddenSubmit(ctx, workerTag, "PaperSubmit", retryCfg, func() error {
-			return cl.PaperSubmit(ctx, paper.PaperID)
-		}); err != nil {
-			if attempt == 0 && isForbiddenAPIError(err) {
-				collectLog("WARN", "[%s] PaperSubmit 返回 403，当前试卷可能失效，尝试新建试卷重试", workerTag)
-				newPaper, nerr := cl.CreateFreshPaper(ctx, paperType)
-				if nerr != nil {
-					return fmt.Errorf("PaperSubmit: %w; PaperNew(retry): %w", err, nerr)
-				}
-				paper = newPaper
-				collectLog("INFO", "[%s] 重试改用新试卷: id=%s week=%d", workerTag, paper.PaperID, paper.Week)
-				continue
-			}
-			return fmt.Errorf("PaperSubmit: %w", err)
-		}
-
-		res, err = cl.PaperDetail(ctx, paper.PaperID)
-		if err != nil {
-			return fmt.Errorf("PaperDetail(result): %w", err)
-		}
-
-		break
-	}
-
-	added, updated, skipped, err := upsertCollectedAnswers(ctx, st, res)
-	if err != nil {
-		return err
-	}
-
-	collectLog("OK", "[%s] 收集结果: 得分=%d 试卷=%s 入库[新增=%d 更新=%d 跳过=%d]",
-		workerTag, res.Mark, res.PaperID, added, updated, skipped)
-	return nil
-}
-
-func tokenToURL(token string) string {
-	return fmt.Sprintf("https://skl.hdu.edu.cn/?type=6&token=%s#/english/list", token)
 }
 
 func runDatabaseWizard(reader *bufio.Reader) {

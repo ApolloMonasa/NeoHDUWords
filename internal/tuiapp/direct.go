@@ -4,20 +4,18 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math/rand/v2"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
 	"hduwords/internal/browser"
+	"hduwords/internal/engine"
 	"hduwords/internal/sklclient"
 	"hduwords/internal/store"
 	"hduwords/internal/tokenpool"
@@ -127,7 +125,6 @@ func runCollectDirect(reader *bufio.Reader) {
 		dbPath = "hduwords.db"
 	}
 	tokenURL := promptTokenURL(reader, false)
-	paperType := 0
 	rateStr, _ := readLine(reader, "请求速率 [2]")
 	if strings.TrimSpace(rateStr) == "" {
 		rateStr = "2"
@@ -139,7 +136,7 @@ func runCollectDirect(reader *bufio.Reader) {
 	}
 	ua, _ := readLine(reader, "UA [默认桌面 Chrome]")
 	if strings.TrimSpace(ua) == "" {
-		ua = defaultUserAgent
+		ua = sklclient.DefaultUserAgent
 	}
 	cooldownStr, _ := readLine(reader, "冷却时间 [5m]")
 	if strings.TrimSpace(cooldownStr) == "" {
@@ -147,7 +144,7 @@ func runCollectDirect(reader *bufio.Reader) {
 	}
 	poolFile, _ := readLine(reader, "token 池文件 [.tokens]")
 	if strings.TrimSpace(poolFile) == "" {
-		poolFile = ".tokens"
+		poolFile = tokenpool.DefaultPoolFile
 	}
 	workersStr, _ := readLine(reader, "worker 数 [0]")
 	if strings.TrimSpace(workersStr) == "" {
@@ -163,9 +160,8 @@ func runCollectDirect(reader *bufio.Reader) {
 		submitRetryIntStr = "10s"
 	}
 	submitRetries, _ := strconv.Atoi(strings.TrimSpace(submitRetriesStr))
-	submitRetryInt := mustDuration(submitRetryIntStr, 10*time.Second)
 
-	retryCfg := submitRetryConfig{MaxRetries: submitRetries, Interval: submitRetryInt}.normalized()
+	retryCfg := engine.SubmitRetryConfig{MaxRetries: submitRetries, Interval: mustDuration(submitRetryIntStr, 10*time.Second)}.Normalized()
 	st, err := store.Open(dbPath)
 	if err != nil {
 		fmt.Printf("打开数据库失败：%v\n", err)
@@ -178,46 +174,25 @@ func runCollectDirect(reader *bufio.Reader) {
 		fmt.Printf("加载 token 池失败：%v\n", err)
 		return
 	}
-	poolTokens := pool.Tokens
-	workerURLs := make([]string, 0)
-	if len(poolTokens) > 0 {
-		for _, tk := range poolTokens {
-			workerURLs = append(workerURLs, tokenToURL(tk))
-		}
-	} else if tokenURL != "" {
-		workerURLs = append(workerURLs, tokenURL)
-	} else {
-		workerURLs = append(workerURLs, getFinalTokenURL(""))
-	}
 
-	workerCount := len(workerURLs)
-	if workers > 0 && workers < workerCount {
-		workerCount = workers
-	}
-	if workerCount <= 0 {
+	specs := engine.BuildWorkers(pool.Tokens, resolveURLForTUI(tokenURL), workers, sklclient.Options{
+		BaseUserAgent: ua,
+		Timeout:       mustDuration(timeoutStr, 15*time.Second),
+		MaxRPS:        rate,
+	}, collectLog)
+	if len(specs) == 0 {
 		fmt.Println("可用 token 数为 0")
 		return
 	}
-	collectLog("INFO", "进入收集模式：workers=%d tokenPool=%d cooldown=%v submitRetries=%d retryInterval=%v", workerCount, len(workerURLs), cooldownStr, retryCfg.MaxRetries, retryCfg.Interval)
 
-	var wg sync.WaitGroup
-	for i := 0; i < workerCount; i++ {
-		workerTag := fmt.Sprintf("w%02d", i+1)
-		workerURL := workerURLs[i]
-		wg.Add(1)
-		go func(tag, raw string) {
-			defer wg.Done()
-			cl, err := sklclient.NewFromTokenURL(raw, sklclient.Options{BaseUserAgent: ua, Timeout: mustDuration(timeoutStr, 15*time.Second), MaxRPS: rate})
-			if err != nil {
-				fmt.Printf("[%s] 初始化客户端失败：%v\n", tag, err)
-				return
-			}
-			runCollectLoop(ctx, tag, cl, st, paperType, mustDuration(cooldownStr, 5*time.Minute), retryCfg)
-		}(workerTag, workerURL)
-	}
 	fmt.Println("按 Ctrl+C 返回主菜单")
-	<-ctx.Done()
-	wg.Wait()
+	engine.RunCollectPool(ctx, engine.CollectPoolOptions{
+		Workers:  specs,
+		Store:    st,
+		Cooldown: mustDuration(cooldownStr, 5*time.Minute),
+		Retry:    retryCfg,
+		Log:      collectLog,
+	})
 	fmt.Println("收集已停止，返回主菜单")
 }
 
@@ -258,7 +233,7 @@ func runExamLikeDirect(reader *bufio.Reader) {
 	if strings.TrimSpace(unknownPolicyInput) != "" {
 		unknownPolicy = strings.TrimSpace(unknownPolicyInput)
 	}
-	ua := examMobileUserAgent
+	ua := sklclient.ExamMobileUserAgent
 	submitRetriesStr, _ := readLine(reader, "提交 403 重试次数 [3]")
 	if strings.TrimSpace(submitRetriesStr) == "" {
 		submitRetriesStr = "3"
@@ -268,7 +243,7 @@ func runExamLikeDirect(reader *bufio.Reader) {
 		submitRetryIntStr = "10s"
 	}
 	submitRetries, _ := strconv.Atoi(strings.TrimSpace(submitRetriesStr))
-	retryCfg := submitRetryConfig{MaxRetries: submitRetries, Interval: mustDuration(submitRetryIntStr, 10*time.Second)}.normalized()
+	retryCfg := engine.SubmitRetryConfig{MaxRetries: submitRetries, Interval: mustDuration(submitRetryIntStr, 10*time.Second)}.Normalized()
 
 	contextTimeout := waitBeforeSubmit + 15*time.Minute
 	if contextTimeout < 20*time.Minute {
@@ -299,7 +274,7 @@ func runExamLikeDirect(reader *bufio.Reader) {
 	runPaperFlow(reqCtx, st, cl, paperType, waitBeforeSubmit, score, dryRun, policy, retryCfg)
 }
 
-func runPaperFlow(ctx context.Context, st *store.Store, cl *sklclient.Client, paperType int, waitBeforeSubmit time.Duration, targetScore int, dryRun bool, policy unknownPolicy, retryCfg submitRetryConfig) {
+func runPaperFlow(ctx context.Context, st *store.Store, cl *sklclient.Client, paperType int, waitBeforeSubmit time.Duration, targetScore int, dryRun bool, policy unknownPolicy, retryCfg engine.SubmitRetryConfig) {
 	if policy != unknownRandom {
 		policy = unknownRandom
 	}
@@ -321,7 +296,7 @@ func runPaperFlow(ctx context.Context, st *store.Store, cl *sklclient.Client, pa
 
 		detail, err := cl.PaperDetail(ctx, paper.PaperID)
 		if err != nil {
-			if attempt == 0 && isForbiddenAPIError(err) {
+			if attempt == 0 && engine.IsForbiddenAPIError(err) {
 				fmt.Println("PaperDetail 返回 403，尝试新建试卷重试")
 				newPaper, nerr := cl.CreateExamPaper(ctx, paperType)
 				if nerr != nil {
@@ -452,8 +427,8 @@ func runPaperFlow(ctx context.Context, st *store.Store, cl *sklclient.Client, pa
 		}
 
 		if len(submission) > 0 {
-			if err := retryForbiddenSubmit(ctx, "", "PaperSave", retryCfg, func() error { return cl.PaperSave(ctx, paper.PaperID, submission) }); err != nil {
-				if attempt == 0 && isForbiddenAPIError(err) {
+			if err := engine.RetryForbiddenSubmit(ctx, "", "PaperSave", retryCfg, collectLog, func() error { return cl.PaperSave(ctx, paper.PaperID, submission) }); err != nil {
+				if attempt == 0 && engine.IsForbiddenAPIError(err) {
 					fmt.Println("PaperSave 返回 403，尝试新建试卷重试")
 					newPaper, nerr := cl.CreateExamPaper(ctx, paperType)
 					if nerr != nil {
@@ -468,8 +443,8 @@ func runPaperFlow(ctx context.Context, st *store.Store, cl *sklclient.Client, pa
 				return
 			}
 		}
-		if err := retryForbiddenSubmit(ctx, "", "PaperSubmit", retryCfg, func() error { return cl.PaperSubmit(ctx, paper.PaperID) }); err != nil {
-			if attempt == 0 && isForbiddenAPIError(err) {
+		if err := engine.RetryForbiddenSubmit(ctx, "", "PaperSubmit", retryCfg, collectLog, func() error { return cl.PaperSubmit(ctx, paper.PaperID) }); err != nil {
+			if attempt == 0 && engine.IsForbiddenAPIError(err) {
 				fmt.Println("PaperSubmit 返回 403，尝试新建试卷重试")
 				newPaper, nerr := cl.CreateExamPaper(ctx, paperType)
 				if nerr != nil {
@@ -495,7 +470,7 @@ func runPaperFlow(ctx context.Context, st *store.Store, cl *sklclient.Client, pa
 		} else if !ok {
 			fmt.Printf("exam 试卷未出现在列表中：%s\n", paper.PaperID)
 		}
-		added, updated, skipped, err := upsertCollectedAnswers(ctx, st, res)
+		added, updated, skipped, err := engine.UpsertCollectedAnswers(ctx, st, res)
 		if err != nil {
 			fmt.Printf("回收答案失败：%v\n", err)
 			return
@@ -671,22 +646,6 @@ func getFinalTokenURL(rawURL string) string {
 	return fmt.Sprintf("https://skl.hdu.edu.cn/?type=6&token=%s#/english/list", token)
 }
 
-func isForbiddenAPIError(err error) bool {
-	var apiErr *sklclient.APIError
-	return errors.As(err, &apiErr) && apiErr.StatusCode == 403
-}
-
-func waitWithContext(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
 func waitWithProgressBar(ctx context.Context, d time.Duration, label string) error {
 	if d <= 0 {
 		return nil
@@ -735,32 +694,6 @@ func renderProgressBar(label string, elapsed, total time.Duration) {
 	fmt.Printf("\r\x1b[2K%s [%s] %3d%%", label, bar, percent)
 }
 
-func upsertCollectedAnswers(ctx context.Context, st *store.Store, res sklclient.PaperDetail) (int, int, int, error) {
-	added, updated, skipped := 0, 0, 0
-	for _, q := range res.List {
-		answerChoice := q.Answer
-		if answerChoice == "" && q.Right != nil && *q.Right {
-			answerChoice = q.Input
-		}
-		if answerChoice == "" {
-			skipped++
-			continue
-		}
-		cidx, ok := sklclient.ChoiceToIndex(answerChoice)
-		if !ok {
-			skipped++
-			continue
-		}
-		a, u, err := st.UpsertAnswer(ctx, q.Title, q.Options(), q.Options()[cidx], "api_detail")
-		if err != nil {
-			return 0, 0, 0, fmt.Errorf("UpsertAnswer: %w", err)
-		}
-		added += a
-		updated += u
-	}
-	return added, updated, skipped, nil
-}
-
 func parseUnknownPolicy(s string) (unknownPolicy, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "abort":
@@ -781,62 +714,3 @@ const (
 	unknownSkip
 	unknownRandom
 )
-
-type submitRetryConfig struct {
-	MaxRetries int
-	Interval   time.Duration
-}
-
-func (c submitRetryConfig) normalized() submitRetryConfig {
-	if c.MaxRetries < 0 {
-		c.MaxRetries = 0
-	}
-	if c.Interval <= 0 {
-		c.Interval = 10 * time.Second
-	}
-	return c
-}
-
-func retryForbiddenSubmit(ctx context.Context, workerTag, opName string, cfg submitRetryConfig, fn func() error) error {
-	err := fn()
-	if err == nil || !isForbiddenAPIError(err) || cfg.MaxRetries == 0 {
-		return err
-	}
-	for i := 1; i <= cfg.MaxRetries; i++ {
-		if err := waitWithContext(ctx, cfg.Interval); err != nil {
-			return err
-		}
-		err = fn()
-		if err == nil {
-			return nil
-		}
-		if !isForbiddenAPIError(err) {
-			return err
-		}
-	}
-	return err
-}
-
-var errTimeRegexp = regexp.MustCompile(`上次申请时间(\d{2}:\d{2}:\d{2})`)
-
-func calcDynamicCooldown(errMsg string, defaultCooldown time.Duration) time.Duration {
-	m := errTimeRegexp.FindStringSubmatch(errMsg)
-	if len(m) < 2 {
-		return defaultCooldown
-	}
-	timeStr := m[1]
-	now := time.Now()
-	t, err := time.ParseInLocation("15:04:05", timeStr, now.Location())
-	if err != nil {
-		return defaultCooldown
-	}
-	lastReqTime := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), t.Second(), 0, now.Location())
-	if lastReqTime.After(now) {
-		lastReqTime = lastReqTime.Add(-24 * time.Hour)
-	}
-	elapsed := now.Sub(lastReqTime)
-	if elapsed >= defaultCooldown {
-		return 5 * time.Second
-	}
-	return defaultCooldown - elapsed + 2*time.Second
-}
