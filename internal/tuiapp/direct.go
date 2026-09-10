@@ -313,6 +313,33 @@ func runDBExportDirect(reader *bufio.Reader, markdown bool) {
 	}
 }
 
+func runDBConflictsDirect(reader *bufio.Reader) {
+	dbPath := readString(reader, "数据库路径 [hduwords.db]", "hduwords.db")
+	limit := readInt(reader, "最多显示条数 [20]", 20)
+
+	st, err := store.Open(dbPath)
+	if err != nil {
+		fmt.Printf("打开数据库失败：%v\n", err)
+		return
+	}
+	defer st.Close()
+	conflicts, err := st.ListConflicts(context.Background(), limit)
+	if err != nil {
+		fmt.Printf("查询冲突失败：%v\n", err)
+		return
+	}
+	if len(conflicts) == 0 {
+		fmt.Println("没有答案冲突记录")
+		return
+	}
+	fmt.Printf("共 %d 条冲突（按观测时间倒序）：\n\n", len(conflicts))
+	for i, c := range conflicts {
+		fmt.Printf("%d. %s\n", i+1, c.Stem)
+		fmt.Printf("   旧答案 %q → 新答案 %q（当前采用 %q），观测于 %s，来源 %s\n",
+			c.OldCorrect, c.NewCorrect, c.Current, c.ObservedAt, c.Source)
+	}
+}
+
 func runDBUpdateDirect() {
 	dest := "hduwords.db"
 	asset := updatecheck.DBAsset()

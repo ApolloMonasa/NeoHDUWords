@@ -75,6 +75,7 @@ Usage:
 	%[1]s db stats --db <path>
 	%[1]s db export --db <path> [--format json|markdown] [--out <file>]
 	%[1]s db update [--out <file>]
+	%[1]s db conflicts [--db <path>] [--limit 20]
 
 Commands:
 	login      自动打开浏览器，完成统一身份认证后捕获凭证，写入凭证库并设为主账号
@@ -328,7 +329,7 @@ func collectCmd(args []string) {
 
 func dbCmd(args []string) {
 	if len(args) < 1 {
-		fatalf("db subcommand required (stats|export|markdown|update)")
+		fatalf("db subcommand required (stats|export|markdown|update|conflicts)")
 	}
 	switch args[0] {
 	case "stats":
@@ -339,8 +340,44 @@ func dbCmd(args []string) {
 		dbMarkdownCmd(args[1:])
 	case "update":
 		dbUpdateCmd(args[1:])
+	case "conflicts":
+		dbConflictsCmd(args[1:])
 	default:
 		fatalf("unknown db subcommand: %s", args[0])
+	}
+}
+
+func dbConflictsCmd(args []string) {
+	fs := flag.NewFlagSet("db conflicts", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	dbPath := fs.String("db", "hduwords.db", "sqlite db path")
+	limit := fs.Int("limit", 20, "max conflicts to show")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	st, err := store.Open(*dbPath)
+	if err != nil {
+		fatalErr(err)
+	}
+	defer st.Close()
+
+	conflicts, err := st.ListConflicts(ctx, *limit)
+	if err != nil {
+		fatalErr(err)
+	}
+	if len(conflicts) == 0 {
+		fmt.Println("没有答案冲突记录")
+		return
+	}
+	fmt.Printf("共 %d 条冲突（按观测时间倒序）：\n\n", len(conflicts))
+	for i, c := range conflicts {
+		fmt.Printf("%d. %s\n", i+1, c.Stem)
+		fmt.Printf("   旧答案 %q → 新答案 %q（当前采用 %q），观测于 %s，来源 %s\n",
+			c.OldCorrect, c.NewCorrect, c.Current, c.ObservedAt, c.Source)
 	}
 }
 func dbUpdateCmd(args []string) {

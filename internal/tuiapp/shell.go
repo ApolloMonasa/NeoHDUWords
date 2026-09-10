@@ -155,6 +155,7 @@ func runDatabaseWizard(reader *bufio.Reader) {
 	fmt.Println("  2. export json")
 	fmt.Println("  3. export markdown")
 	fmt.Println("  4. update")
+	fmt.Println("  5. conflicts")
 	choice, _ := readLine(reader, "请选择")
 	switch strings.TrimSpace(choice) {
 	case "1":
@@ -165,6 +166,8 @@ func runDatabaseWizard(reader *bufio.Reader) {
 		runDBExportDirect(reader, true)
 	case "4":
 		runDBUpdateDirect()
+	case "5":
+		runDBConflictsDirect(reader)
 	default:
 		fmt.Println("无效选择")
 	}

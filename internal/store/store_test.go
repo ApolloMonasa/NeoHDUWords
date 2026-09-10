@@ -104,3 +104,44 @@ func TestExportEmptyReturnsEmptySlice(t *testing.T) {
 		t.Fatalf("expected zero items, got %d", len(items))
 	}
 }
+
+func TestListConflicts(t *testing.T) {
+	ctx := context.Background()
+	f, err := os.CreateTemp("", "hduwords-conflicts-*.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := f.Name()
+	_ = f.Close()
+	defer os.Remove(path)
+
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	opts := []string{"a", "b", "c", "d"}
+	if _, _, err := st.UpsertAnswer(ctx, "stem-1", opts, "a", "s1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.UpsertAnswer(ctx, "stem-2", opts, "b", "s1"); err != nil {
+		t.Fatal(err)
+	}
+	// stem-1 换答案 → 1 条冲突；stem-2 保持
+	if _, _, err := st.UpsertAnswer(ctx, "stem-1", opts, "c", "s2"); err != nil {
+		t.Fatal(err)
+	}
+
+	conflicts, err := st.ListConflicts(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conflicts) != 1 {
+		t.Fatalf("expected 1 conflict, got %d", len(conflicts))
+	}
+	c := conflicts[0]
+	if c.Stem != "stem-1" || c.OldCorrect != "a" || c.NewCorrect != "c" || c.Current != "c" || c.Source != "s2" {
+		t.Fatalf("unexpected conflict record: %+v", c)
+	}
+}

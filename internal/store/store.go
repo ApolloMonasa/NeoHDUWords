@@ -126,6 +126,43 @@ type Stats struct {
 	Conflicts int
 }
 
+// Conflict 是一条答案冲突记录：同一题先后收集到不同的"正确答案"。
+type Conflict struct {
+	Stem       string
+	OldCorrect string
+	NewCorrect string
+	Current    string // 当前题库采用的答案
+	ObservedAt string
+	Source     string
+}
+
+// ListConflicts 按观测时间倒序返回答案冲突记录。
+func (s *Store) ListConflicts(ctx context.Context, limit int) ([]Conflict, error) {
+	const q = `
+SELECT i.stem_raw, c.old_correct_text, c.new_correct_text, a.correct_text, c.observed_at, c.source
+FROM conflicts_v2 c
+JOIN items_v2 i ON i.id = c.item_id
+LEFT JOIN answers_v2 a ON a.item_id = i.id
+ORDER BY c.observed_at DESC
+LIMIT ?
+`
+	rows, err := s.db.QueryContext(ctx, q, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	res := make([]Conflict, 0)
+	for rows.Next() {
+		var c Conflict
+		if err := rows.Scan(&c.Stem, &c.OldCorrect, &c.NewCorrect, &c.Current, &c.ObservedAt, &c.Source); err != nil {
+			return nil, err
+		}
+		res = append(res, c)
+	}
+	return res, rows.Err()
+}
+
 type ExportItem struct {
 	Stem         string   `json:"stem"`
 	Options      []string `json:"options"`
