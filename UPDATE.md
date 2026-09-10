@@ -10,7 +10,7 @@
 
 3. **下载新版本** — 用户确认更新后，程序从 GitHub Release 页面下载匹配当前操作系统和 CPU 架构的二进制文件，保存到 `.updates/` 目录。
 
-4. **替换自身** — 一个运行中的程序不能直接覆盖自己，所以它会把自身复制到一个临时目录，用那个副本启动一个"安装助手"进程，传给它两个路径：下载的新文件在哪、要覆盖的原文件在哪。安装助手启动后，原进程退出，助手把新文件拷过去，完成替换。
+4. **校验并替换自身** — 下载完成后先做 SHA256 完整性校验（如果该发行版提供了 SHA256SUMS 文件），然后通过"安装助手"进程完成自替换。一个运行中的程序不能直接覆盖自己，所以它会把自身复制到一个临时目录，用那个副本启动"安装助手"，传给它两个路径：下载的新文件在哪、要覆盖的原文件在哪。安装助手启动后，原进程退出，助手把新文件拷过去，完成替换。
 
 整个过程不需要用户手动去 GitHub 下载任何东西。
 
@@ -20,7 +20,7 @@
 
 ### 1. 版本信息注入
 
-文件：[internal/buildinfo/buildinfo.go](internal/buildinfo/buildinfo.go)
+文件：`internal/buildinfo/buildinfo.go`
 
 ```go
 var (
@@ -38,31 +38,25 @@ go build -ldflags "
 " -o cli ./cmd/hduwords
 ```
 
-- CI 构建（[.github/workflows/ci.yml](.github/workflows/ci.yml)）：`Version` 固定为 `"dev"`，`Commit` 为当前提交 SHA。因为 CI 构建不用于分发，标记为 `dev` 意味着"开发版，不走版本号比对"。
-- Release 构建（[.github/workflows/release.yml](.github/workflows/release.yml)）：`Version` 为 git tag（如 `v1.2.3`），`Commit` 为当前提交 SHA。
+- CI 构建（`.github/workflows/ci.yml`）：`Version` 固定为 `"dev"`，`Commit` 为当前提交 SHA。CI 构建不用于分发，标记为 `dev` 意味着"开发版，不走版本号比对"。
+- Release 构建（`.github/workflows/release.yml`）：`Version` 为 git tag（如 `v1.2.3`），`Commit` 为当前提交 SHA。
 
 ### 2. 发行版构建与资产命名
 
-Release 流程由推 `v*` 标签触发（[release.yml:5-6](.github/workflows/release.yml#L5-L6)），在 GitHub Actions 的 ubuntu-latest 跑机上交叉编译出 4 个平台 × 2 个入口 = 8 个二进制文件：
+Release 流程由推 `v*` 标签触发，先跑 `go test ./...` 作为发布门禁，再交叉编译出 4 个平台 × 2 个入口 = 8 个二进制文件：
 
 | 文件 | 平台 |
 |------|------|
-| `cli-linux-amd64` | Linux x86_64 CLI |
-| `tui-linux-amd64` | Linux x86_64 TUI |
-| `cli-windows-amd64.exe` | Windows x86_64 CLI |
-| `tui-windows-amd64.exe` | Windows x86_64 TUI |
-| `cli-darwin-amd64` | macOS Intel CLI |
-| `tui-darwin-amd64` | macOS Intel TUI |
-| `cli-darwin-arm64` | macOS Apple Silicon CLI |
-| `tui-darwin-arm64` | macOS Apple Silicon TUI |
+| `cli-linux-amd64` / `tui-linux-amd64` | Linux x86_64 |
+| `cli-windows-amd64.exe` / `tui-windows-amd64.exe` | Windows x86_64 |
+| `cli-darwin-amd64` / `tui-darwin-amd64` | macOS Intel |
+| `cli-darwin-arm64` / `tui-darwin-arm64` | macOS Apple Silicon |
 
-文件命名规则：`{binary}-{os}-{arch}[.exe]`，例如 `tui-darwin-arm64` 表示 macOS ARM64 平台的 TUI。
-
-所有文件通过 `softprops/action-gh-release@v2` 上传为 GitHub Release 的附件资产（asset）。
+文件命名规则：`{binary}-{os}-{arch}[.exe]`。构建完成后生成 `SHA256SUMS`（对 dist 下所有文件做 sha256），与二进制一起上传为 Release 资产。资产命名是 `AssetForCurrentPlatform()` 的匹配依据，不可改变格式。
 
 ### 3. 更新检查流程
 
-入口在 [internal/updatecheck/updatecheck.go](internal/updatecheck/updatecheck.go) 的 `Check()` 函数。
+入口在 `internal/updatecheck/updatecheck.go` 的 `Check()` 函数。
 
 **版本模式（有正式版本号，即 `Version != "dev"` 且非空）：**
 
@@ -88,97 +82,63 @@ Release 流程由推 `v*` 标签触发（[release.yml:5-6](.github/workflows/rel
                      ② GET /repos/{owner}/{repo}/commits/{branch} → 取 sha
 ```
 
-- 从本地 `.git` 目录读取当前 HEAD 的 commit SHA（支持 worktree、packed-refs）
-- 从 GitHub API 先查到默认分支名，再查该分支最新 commit SHA
-- 两个 SHA 不同则为有更新
-
 本质上：**正式发布用 tag 比，开发版用 git commit 比。**
 
-### 4. 资产匹配
+### 4. 资产匹配与下载
 
-函数：[internal/updatecheck/release.go](internal/updatecheck/release.go) `AssetForCurrentPlatform()`
+`internal/updatecheck/release.go`：
 
-```go
-goos := strings.ToLower(runtime.GOOS)   // "linux" / "windows" / "darwin"
-goarch := strings.ToLower(runtime.GOARCH) // "amd64" / "arm64"
-needle := fmt.Sprintf("%s-%s-%s", binaryName, goos, goarch)
-// 例如: "cli-linux-amd64"
-```
+- `AssetForCurrentPlatform(binaryName)`：按 `{binaryName}-{GOOS}-{GOARCH}` 在 Release 资产中大小写不敏感匹配（带或不带 `.exe`）。CLI 传 `"cli"`，TUI 传 `"tui"`。
+- `DownloadAsset()`：用 asset 的 `browser_download_url` 下载到 `.updates/` 目录（TUI 可用 `--updates-dir` 自定义）。
 
-遍历 Release 的所有 asset，去掉扩展名后与 `needle` 做大小写不敏感比较。传递的 `binaryName` 参数：
-- CLI 更新传 `"cli"`
-- TUI 更新传 `"tui"`
+### 5. SHA256 完整性校验
 
-如果找不到匹配当前平台的资产，更新中止并提示用户。
+`internal/updatecheck/release.go` 的 `VerifyAssetChecksum()`：
 
-### 5. 下载
-
-函数：[internal/updatecheck/release.go](internal/updatecheck/release.go) `DownloadAsset()`
-
-- 用 asset 的 `browser_download_url` 发起 HTTP GET
-- 写入到 `.updates/` 目录（可通过 `--updates-dir` 自定义）
-- 返回写入的字节数
+- 从同一 Release 下载 `SHA256SUMS`，解析出 `文件名 → sha256` 映射，与本地下载文件的实际哈希比对。
+- 返回值区分三种"无法校验"的情况（哨兵错误，调用方决定放行）：
+  - `ErrNoSumsAsset`：该 Release 没有附带 SHA256SUMS（历史版本）→ 提示后跳过校验
+  - `ErrAssetNotInSums`：SUMS 里没有该资产条目 → 提示后跳过
+  - 哈希不匹配 → **中止安装**（真错误）
+- 注意信任模型：SUMS 与二进制同源同渠道，校验防的是**传输损坏**，不是供应链投毒（攻击者可同时替换两者）。身份验证需要签名，目前未实现。
 
 ### 6. 自替换（安装）
 
-这是最精巧的部分。一个正在运行的进程不能直接覆写自己的可执行文件（Windows 会锁文件，Linux 虽然允许但行为不安全）。
+这是最精巧的部分。运行中的进程不能覆写自己的可执行文件（Windows 会锁文件，Linux 虽允许但行为不安全）。
 
-**CLI 的安装流程**（[cmd/hduwords/main.go:217-235](cmd/hduwords/main.go#L217-L235)）：
+`internal/updater/updater.go` 的 `InstallSelfUpdate()`：
 
 ```
 1. os.Executable()  → 拿到自己的路径，比如 /usr/local/bin/cli
 2. os.MkdirTemp()   → 创建临时目录，比如 /tmp/hduwords-updater-xxxx/
 3. 把自己拷贝到临时目录 → /tmp/hduwords-updater-xxxx/cli
-4. exec.Command(临时副本, "apply-update",
-       "--source", "下载的新文件",
-       "--target", "自己的原路径").Start()
-5. 原进程 os.Exit()
+4. exec.Command(临时副本, ...ApplyArgs) 启动安装助手
+5. 原进程返回并退出
 ```
 
+安装助手参数由入口注入（`Options.ApplyArgs`），因为两入口 flag 风格不同：
+
+| 入口 | 助手参数 | 处理位置 |
+|------|----------|----------|
+| CLI | `apply-update --source <新文件> --target <原文件>` | `cmd/hduwords` 的 `apply-update` 子命令 |
+| TUI | `--apply-update --source <新文件> --target <原文件>` | `cmd/tui` 的同名开关 |
+
+**Windows 特殊处理**（`internal/updatecheck/install.go` 的 `installBinaryWindows`）：exe 被运行时无法直接覆盖，最多重试 20 次（每 250ms）删除旧文件后再拷贝新文件。POSIX 直接"写临时文件 + rename"原子替换。
+
+### 7. 共用编排层
+
+`internal/updater` 包承载两入口共用的完整交互流程（`Run()`）：
+
 ```
-  ┌──────────┐    spawn    ┌──────────────┐    copy    ┌──────────┐
-  │  原进程   │ ────────→  │  临时副本进程  │ ────────→  │  新二进制  │
-  │  (退出)   │            │  apply-update │            │  (替换)   │
-  └──────────┘            └──────────────┘            └──────────┘
-```
-
-**TUI 的安装流程**（[cmd/tui/main.go:17-22](cmd/tui/main.go#L17-L22)）：
-
-TUI 的入口本身就是 `--apply-update` 开关。安装时同样：
-1. 把自己拷贝到临时目录
-2. 用 `exec.Command(临时副本, "--apply-update", "--source", ..., "--target", ...)` 启动
-3. 原进程退出
-
-**Windows 特殊处理**（[internal/updatecheck/install.go:26-37](internal/updatecheck/install.go#L26-L37)）：
-
-```go
-func installBinaryWindows(srcPath, targetPath string) error {
-    for i := 0; i < 20; i++ {
-        os.Remove(targetPath)  // 尝试删除被锁的旧文件
-        time.Sleep(250ms)
-    }
-    copyFile(srcPath, targetPath)
-}
+检查版本（20s 超时）→ 打印状态
+  → 无更新：结束
+  → 确认下载？（--yes / TUI 交互跳过）
+  → 下载资产 → SHA256 校验
+  → 确认安装？
+  → InstallSelfUpdate → 原进程退出
 ```
 
-Windows 上 exe 文件被运行时无法直接覆盖，所以最多重试 20 次（共等待 5 秒）删除旧文件，然后再拷贝新文件。
-
-**POSIX（Linux/macOS）**：直接 `copyFile` + `os.Chmod(0o755)` 即可，没有文件锁问题。
-
-### 7. 两个入口的更新触发方式
-
-| 入口 | 触发方式 |
-|------|----------|
-| CLI `./cli update` | 用户主动执行 `update` 子命令 |
-| TUI `./tui` | 启动时自动检查，检测到更新后询问用户 |
-
-两者核心逻辑相同，只是用户交互方式不同（CLI 用命令行参数 `--yes` / `--check-only`，TUI 用交互式 yes/no 提示）。
-
-CLI 支持纯检查模式：
-```bash
-./cli update --check-only    # 只报告不安装
-./cli update --yes           # 跳过确认直接安装
-```
+CLI 的 `update` 子命令和 TUI 启动时的自动检查都只是给它传参数（二进制名、安装助手参数风格、确认策略）并承接结果，不再各自维护一份流程。
 
 ### 8. 数据流总结
 
@@ -188,38 +148,29 @@ push v* tag
     ▼
 GitHub Actions (release.yml)
     │
+    ├─ go test ./...（发布门禁）
     ├─ 交叉编译 8 个平台二进制
     ├─ ldflags 注入 Version + Commit
-    └─ 上传为 GitHub Release assets
+    └─ 生成 SHA256SUMS，全部上传为 Release 资产
            │
            ▼
     用户运行 cli / tui
            │
            ▼
     updatecheck.Check()
+    （版本模式: Version vs tag_name；开发模式: git HEAD vs 远端 HEAD）
            │
-           ├─ 版本模式: 比较 Version vs Release tag_name
-           └─ 开发模式: 比较 git HEAD vs 远端 HEAD
-                  │
-                  ▼ (Available = true)
-            询问用户是否更新
-                  │
-                  ▼ (yes)
-    updatecheck.LatestRelease()
-                  │
-                  ▼
-    AssetForCurrentPlatform("cli"|"tui")
-                  │
-                  ▼
-    DownloadAsset() → .updates/
-                  │
-                  ▼
-    installSelfUpdate() → 临时副本 apply-update → 替换自身
+           ▼ (Available = true)
+    updater.Run()：确认 → 下载 → SHA256 校验 → 确认
+           │
+           ▼
+    InstallSelfUpdate() → 临时副本 apply-update → 替换自身
 ```
 
 ### 9. 关键设计决策
 
 - **CLI 和 TUI 独立更新**：两个入口各自检查、各自下载、各自替换。CLI 不会更新 TUI，反之亦然。
-- **不使用源码快照**：老版本可能用过 `DownloadSnapshot()` 下载 zip 源码，当前版本已改为下载预编译二进制，不再需要用户本地有 Go 环境。
+- **预编译二进制而非源码快照**：用户不需要本地 Go 环境。
 - **不需要 GitHub Token**：只读访问公开 Release，不调用需要认证的 API。
-- **安装助手模式**：通过临时副本进程执行 `apply-update` 解决"自己替换自己"的问题，比下载独立 installer 脚本更简洁，也不依赖外部工具。
+- **校验可选、失败即停**：没有 SHA256SUMS 的历史发行版自动跳过校验（向后兼容）；有而不匹配则坚决不装。
+- **安装助手模式**：通过临时副本进程执行替换，比下载独立 installer 脚本更简洁，也不依赖外部工具。

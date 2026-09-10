@@ -21,6 +21,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Test
+        run: go test ./...
+
       - name: Prepare dist
         run: mkdir dist
 
