@@ -51,7 +51,7 @@ internal/buildinfo/  Version/Commit，编译期由 -ldflags 注入
 - **凭证库**：`accounts.json` 是唯一真值源（primary 按别名引用，杜绝旧版双文件分叉）；`tokenpool.LoadStore` 首次遇到旧格式会懒迁移并写回——迁移只读旧文件、永不删除，主账号以旧 `.token` 为准。改动凭证逻辑必须补 `internal/tokenpool/accounts_test.go` 用例。
 - **题库下载**（`db update`）从 Release tag `Data` 的 `hduwords.db` 资产拉取（`updatecheck.DBAsset()`，无 SHA256 校验，HTTPS-only）；下载后必须删除同名 `-wal`/`-shm` 残留（WAL 模式下旧文件会导致读到旧数据）。
 - **collect 用 type=0（练习），exam 用 type=1（正式）**（engine.PaperType* 常量）；exam 强制覆盖为移动端 UA（`sklclient.ExamMobileUserAgent`），勿"修复"此行为；未知题固定随机作答；控分时故意答错的选项也是随机挑的。
-- **403 处理**：save/submit 遇 403 按配置重试后仍失败则新建试卷重来（engine 内用哨兵错误 errRecreatePaper 收敛，最多 2 轮）；collect 循环用"上次申请时间"正则计算动态冷却——这些是服务端限频的应对逻辑，重构时保留语义。
+- **403 处理**：save/submit 遇 403 按配置重试后仍失败则新建试卷重来（engine 内用哨兵错误 errRecreatePaper 收敛，最多 2 轮）；collect 循环用"上次申请时间"正则计算动态冷却——这些是服务端限频的应对逻辑，重构时保留语义。注意动态冷却的判定里 `strings.Contains(msg, "失败")` 匹配很宽（继承自旧版），新增错误文案避免随手带"失败"二字。
 - **凭证失效检测**：`sklclient.IsAuthError`（401 或报错文案含 token/未登录/过期等特征）命中时 collect worker 立即退出并提示重新 login，绝不进入冷却循环；特征列表在 `authErrPatterns`，网站恢复后应拿真实报错核对一次。
 - **自更新**：编排统一在 `internal/updater.Run`（检查→确认→下载→SHA256→确认→自替换）；安装助手协议两入口 flag 风格不同（CLI `apply-update`、TUI `--apply-update`），由 `Options.ApplyArgs` 注入；Windows 下有删文件重试循环；SHA256SUMS 缺失用哨兵错误放行（历史版本），不匹配坚决中止。改动前读 UPDATE.md。
 - **store 单连接**：`SetMaxOpenConns(1)`（SQLite 写锁所需），勿调大。

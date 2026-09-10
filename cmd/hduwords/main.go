@@ -82,7 +82,7 @@ Commands:
 	addtoken   自动打开浏览器，登录后把凭证追加写入凭证库（用于 collect 多账号并发）
 	listtokens 查看凭证库账号列表及主账号标识
 	setprimary 设置凭证库的主账号，exam 默认使用该账号
-	collect    收集题库：支持 token 池并发采集；收集与练习统一使用 type=0
+	collect    收集题库：支持凭证库多账号并发采集；收集与练习统一使用 type=0
 	exam       正式自动考试：基于本地题库进行正式考试作答
 	update     检查并安装最新 CLI 发行版（二进制更新）
 	db stats    查看本地题库统计信息（题目数、答案数、冲突数）
