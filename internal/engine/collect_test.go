@@ -244,17 +244,30 @@ func TestRunCollectPool_WorkerExitsOnAuthError(t *testing.T) {
 	defer srv.Close()
 	cl := newTestClient(t, srv)
 
-	// ctx 永不取消：worker 识别凭证失效自行退出后，RunCollectPool 也必须返回
+	// ctx 永不取消：worker 识别凭证失效自行退出后，RunCollectPool 也必须返回，
+	// 且失效 token 经 OnTokenInvalid 回调传出（由前端从凭证库删除）
+	var mu sync.Mutex
+	var invalid []string
 	start := time.Now()
 	RunCollectPool(context.Background(), CollectPoolOptions{
-		Workers:  []WorkerSpec{{Tag: "w01", Client: cl}},
+		Workers:  []WorkerSpec{{Tag: "w01", Client: cl, Token: "tok-t"}},
 		Store:    st,
 		Cooldown: 10 * time.Millisecond,
 		Retry:    SubmitRetryConfig{MaxRetries: 1, Interval: time.Millisecond},
 		Log:      testLogger(t),
+		OnTokenInvalid: func(token string) {
+			mu.Lock()
+			defer mu.Unlock()
+			invalid = append(invalid, token)
+		},
 	})
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Fatalf("RunCollectPool did not return after auth failure: %v", elapsed)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(invalid) != 1 || invalid[0] != "tok-t" {
+		t.Fatalf("expected OnTokenInvalid with tok-t, got %v", invalid)
 	}
 }
 
@@ -323,11 +336,14 @@ func TestBuildWorkers_PoolPriorityAndCap(t *testing.T) {
 	if len(specs) != 2 || specs[0].Tag != "w01" || specs[1].Tag != "w02" {
 		t.Fatalf("expected 2 capped workers w01/w02, got %+v", specs)
 	}
+	if specs[0].Token != "ta" || specs[1].Token != "tb" {
+		t.Fatalf("pool tokens should be carried on specs, got %+v", specs)
+	}
 
-	// 池为空时回退到显式 URL，workers=0 表示自动
+	// 池为空时回退到显式 URL，workers=0 表示自动；Token 从 URL 提取
 	specs = BuildWorkers(nil, "https://x.example/?token=t", 0, sklclient.Options{}, log)
-	if len(specs) != 1 {
-		t.Fatalf("expected 1 worker from explicit url, got %+v", specs)
+	if len(specs) != 1 || specs[0].Token != "t" {
+		t.Fatalf("expected 1 worker with Token=t, got %+v", specs)
 	}
 
 	// URL 无 token 时该 worker 初始化失败被跳过

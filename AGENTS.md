@@ -23,7 +23,7 @@ go build -trimpath -ldflags "-s -w -X hduwords/internal/buildinfo.Version=dev -X
 cmd/hduwords/        CLI 入口：flag 解析 → 调 engine/tokenpool/updater，不含业务流程
 cmd/tui/             TUI 薄入口；--apply-update 时作为自更新安装助手运行
 internal/engine/     collect/exam 核心业务流程（BuildWorkers/RunCollectPool/RunExam），前端通过 LogFunc 注入日志
-internal/tokenpool/  凭证库 accounts.json（单一真值源；login 是替换语义，rmtoken 可清理）
+internal/tokenpool/  凭证库 accounts.json v2（扁平 token 表 + primary 布尔列；失效凭证自动删除）
 internal/updater/    自更新交互流程（检查→下载→SHA256 校验→安装），CLI/TUI 共用
 internal/tuiapp/     TUI 菜单与提问（shell.go 菜单循环，direct.go 各功能提示，prompt.go 类型化输入）
 internal/browser/    chromedp 驱动 Chrome/Edge 完成统一认证并捕获 token
@@ -48,12 +48,12 @@ internal/buildinfo/  Version/Commit，编译期由 -ldflags 注入
 - **发布**：推 `v*` tag 触发 release.yml，交叉编译 8 个二进制（linux/windows amd64 + darwin amd64/arm64 × cli/tui），资产命名 `{cli|tui}-{os}-{arch}[.exe]` 是 `AssetForCurrentPlatform` 的匹配依据，不可改格式。
 - **文件位置策略：一切相对当前运行目录（CWD）**——`accounts.json`、`hduwords.db`（含 `db update` 的下载目标）。不要引入 os.Executable 定位。
 - **gitignored 敏感/生成文件**（不要提交）：`accounts.json`（凭证库，含明文 token）、旧版 `.token`/`.tokens`（历史文件，仅防误提交）、`hduwords.db`/`*.db-wal`/`*.db-shm`、`.updates/`、根目录二进制 `/cli`/`/tui`/`/hduwords`（.gitignore 已用 `/` 锚定到根目录，新增 cmd 子目录不会被误伤）。
-- **凭证库**：`accounts.json` 是唯一真值源（primary 按别名引用）。login 走 `Store.LoginPrimary` 的**替换语义**（token 已存在→切主账号；alias 命中→原地刷新；否则追加），避免会话轮换后累积僵尸账号；`rmtoken` 负责清理。改动凭证逻辑必须补 `internal/tokenpool/accounts_test.go` 用例。旧版 `.token/.tokens` 不做自动迁移——重新 login 即可。
+- **凭证库**：`accounts.json`（v2）是无别名的扁平 token 表，`primary` 布尔列标记至多一个主账号（exam 用）。login 走 `Store.LoginPrimary`：token 已存在→移主账号标记；已有主账号→原地替换其 token（防会话轮换累积僵尸）；否则追加并标记主账号。**失效即删除**：exam 收到 `engine.ErrLoginExpired` 后由前端 `RemoveTokenPersistent` 删主账号凭证；collect 通过 `CollectPoolOptions.OnTokenInvalid` 回调删对应 token。改动凭证逻辑必须补 `internal/tokenpool/accounts_test.go` 用例（含删除后再新增的序列）。旧版 `.token/.tokens` 不迁移——重新 login；旧 v1 `accounts.json`（带别名）读取时自动升级为 v2。
 - **题库下载**（`db update`）从 Release tag `Data` 的 `hduwords.db` 资产拉取（`updatecheck.DBAsset()`，无 SHA256 校验，HTTPS-only）；下载后必须删除同名 `-wal`/`-shm` 残留（WAL 模式下旧文件会导致读到旧数据）。
 - **collect 用 type=0（练习），exam 用 type=1（正式）**（engine.PaperType* 常量）；exam 强制覆盖为移动端 UA（`sklclient.ExamMobileUserAgent`），勿"修复"此行为；未知题固定随机作答；控分时故意答错的选项也是随机挑的。
 - **403 处理**：save/submit 遇 403 按配置重试后仍失败则新建试卷重来（engine 内用哨兵错误 errRecreatePaper 收敛，最多 2 轮）；collect 循环的动态冷却只认结构化 code=2 与"上次申请时间/短时间重试"文案，不做宽泛子串匹配——这些是服务端限频的应对逻辑，重构时保留语义。
-- **凭证失效检测**：`sklclient.IsAuthError`（401 或报错文案含 token/未登录/过期等特征）命中时 collect worker 立即退出、exam 直接失败并返回"请重新 login"提示，绝不进入冷却循环；特征列表在 `authErrPatterns`，网站恢复后应拿真实报错核对一次。
-- **自更新**：编排统一在 `internal/updater.Run`（检查→确认→下载→SHA256→确认→自替换），TUI 可用 `--no-update-check` 跳过启动检查；安装助手协议两入口统一为 `apply-update --source --target` 子命令；Windows 下有删文件重试循环；SHA256SUMS 缺失用哨兵错误放行（历史版本），不匹配坚决中止。改动前读 UPDATE.md。
+- **凭证失效检测**：`sklclient.IsAuthError`（401 或报错文案含 token/未登录/过期等特征）命中时**凭证即被删除**——collect worker 经 OnTokenInvalid 回调删 token 后退出，exam 返回 `ErrLoginExpired` 由前端删主账号凭证；绝不进入冷却循环。特征列表在 `authErrPatterns`，网站恢复后应拿真实报错核对一次。
+- **自更新**：编排统一在 `internal/updater.Run`（检查→单次确认→下载→SHA256 校验→自替换），TUI 可用 `--no-update-check` 跳过启动检查；安装助手协议两入口统一为 `apply-update --source --target` 子命令；Windows 下有删文件重试循环；SHA256SUMS 缺失用哨兵错误放行（历史版本），不匹配坚决中止。改动前读 UPDATE.md。
 - **store 单连接**：`SetMaxOpenConns(1)`（SQLite 写锁所需），勿调大。
 
 ## 代码约定

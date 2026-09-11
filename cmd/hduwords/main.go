@@ -65,11 +65,11 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `%[1]s - HDU 我爱记单词 CLI
 
 Usage:
-	%[1]s login    [--browser chrome|edge] [--alias <name>]
-	%[1]s addtoken [--browser chrome|edge] [--alias <name>]
+	%[1]s login    [--browser chrome|edge]
+	%[1]s addtoken [--browser chrome|edge]
 	%[1]s listtokens [--accounts accounts.json] [--show-plain]
 	%[1]s setprimary --token <token> [--accounts accounts.json]
-	%[1]s rmtoken (--alias <name> | --token <token>) [--accounts accounts.json]
+	%[1]s rmtoken --token <token> [--accounts accounts.json]
 	%[1]s collect [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--ua <ua>] [--cooldown 5m] [--accounts accounts.json] [--workers 0] [--submit-retries 3] [--submit-retry-interval 10s]
 	%[1]s exam    [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--time 30s] [--score 100] [--dry-run] [--submit-retries 3] [--submit-retry-interval 10s]
 	%[1]s update  [--repo owner/name] [--updates-dir .updates] [--yes] [--check-only]
@@ -79,11 +79,11 @@ Usage:
 	%[1]s db conflicts [--db <path>] [--limit 20]
 
 Commands:
-	login      自动打开浏览器，完成统一身份认证后捕获凭证，写入凭证库并设为主账号
+	login      自动打开浏览器，完成统一身份认证后捕获凭证，写入凭证库并标记为主账号
 	addtoken   自动打开浏览器，登录后把凭证追加写入凭证库（用于 collect 多账号并发）
-	listtokens 查看凭证库账号列表及主账号标识
+	listtokens 查看凭证库凭证列表及主账号标识
 	setprimary 设置凭证库的主账号，exam 默认使用该账号
-	rmtoken    删除凭证库中的账号（清理失效凭证）
+	rmtoken    删除凭证库中的凭证（手动清理）
 	collect    收集题库：支持凭证库多账号并发采集；收集与练习统一使用 type=0
 	exam       正式自动考试：基于本地题库进行正式考试作答
 	update     检查并安装最新 CLI 发行版（二进制更新）
@@ -192,7 +192,7 @@ func runExamCmd(args []string) {
 	// exam 模式强制移动端 UA
 	*ua = sklclient.ExamMobileUserAgent
 
-	finalURL := getFinalTokenURL(*rawURL)
+	finalURL, primaryTok := getFinalTokenURL(*rawURL)
 	retryCfg := engine.SubmitRetryConfig{MaxRetries: *submitRetries, Interval: *submitRetryInt}.Normalized()
 
 	collectLog("INFO", "exam 模式启动: type=%d db=%s dryRun=%v submitRetries=%d retryInterval=%v",
@@ -227,6 +227,13 @@ func runExamCmd(args []string) {
 		Retry:            retryCfg,
 		Log:              collectLog,
 	}); err != nil {
+		// 登录过期：删除失效的主账号凭证后提示重新登录
+		if errors.Is(err, engine.ErrLoginExpired) && primaryTok != "" {
+			if rmErr := tokenpool.RemoveTokenPersistent(tokenpool.DefaultAccountsFile, primaryTok); rmErr != nil {
+				collectLog("WARN", "删除失效凭证失败: %v", rmErr)
+			}
+			fatalf("登录过期，已删除失效的主账号凭证，请重新 login")
+		}
 		fatalErr(err)
 	}
 }
@@ -313,7 +320,8 @@ func collectCmd(args []string) {
 		fatalErr(fmt.Errorf("load accounts store: %w", err))
 	}
 
-	workerSpecs := engine.BuildWorkers(acctStore.Tokens(), getFinalTokenURL(*rawURL), *workers, sklclient.Options{
+	fallbackURL, _ := getFinalTokenURL(*rawURL)
+	workerSpecs := engine.BuildWorkers(acctStore.AllTokens(), fallbackURL, *workers, sklclient.Options{
 		BaseUserAgent: *ua,
 		Timeout:       *timeout,
 		MaxRPS:        *rate,
@@ -328,6 +336,11 @@ func collectCmd(args []string) {
 		Cooldown: *cooldown,
 		Retry:    retryCfg,
 		Log:      collectLog,
+		OnTokenInvalid: func(token string) {
+			if err := tokenpool.RemoveTokenPersistent(*accounts, token); err != nil {
+				collectLog("WARN", "删除失效凭证失败: %v", err)
+			}
+		},
 	})
 }
 

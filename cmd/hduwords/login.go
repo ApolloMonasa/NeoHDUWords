@@ -15,7 +15,6 @@ func loginCmd(args []string) {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	browserType := fs.String("browser", "", "浏览器种类: chrome|edge（留空自动检测）")
-	alias := fs.String("alias", "", "账号别名（默认自动编号 acct-N）")
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
@@ -30,7 +29,7 @@ func loginCmd(args []string) {
 	if err != nil {
 		fatalf("打开凭证库失败: %v", err)
 	}
-	name, action, err := st.LoginPrimary(token, *alias)
+	action, err := st.LoginPrimary(token)
 	if err != nil {
 		fatalf("写入凭证库失败: %v", err)
 	}
@@ -39,13 +38,11 @@ func loginCmd(args []string) {
 	}
 	switch action {
 	case tokenpool.LoginSwitched:
-		fmt.Printf(">>> 账号 %s 已在凭证库中，已设为主账号（exam 默认使用）。\n", name)
-	case tokenpool.LoginRefreshed:
-		fmt.Printf(">>> 已刷新账号 %s 的凭证并设为主账号（exam 默认使用）。\n", name)
+		fmt.Println(">>> 该凭证已在凭证库中，已标记为主账号（exam 默认使用）。")
 	case tokenpool.LoginReplacedPrimary:
-		fmt.Printf(">>> 已刷新主账号 %s 的凭证（exam 默认使用）。\n", name)
+		fmt.Println(">>> 已刷新主账号凭证（exam 默认使用）。")
 	default:
-		fmt.Printf(">>> 已新增账号 %s 并设为主账号（exam 默认使用）。\n", name)
+		fmt.Println(">>> 已新增凭证并标记为主账号（exam 默认使用）。")
 	}
 }
 
@@ -53,7 +50,6 @@ func addTokenCmd(args []string) {
 	fs := flag.NewFlagSet("addtoken", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	browserType := fs.String("browser", "", "浏览器种类: chrome|edge（留空自动检测）")
-	alias := fs.String("alias", "", "账号别名（默认自动编号 acct-N）")
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
@@ -68,7 +64,7 @@ func addTokenCmd(args []string) {
 	if err != nil {
 		fatalf("打开凭证库失败: %v", err)
 	}
-	name, added, err := st.Upsert(token, *alias, "")
+	added, err := st.Upsert(token)
 	if err != nil {
 		fatalf("写入凭证库失败: %v", err)
 	}
@@ -76,9 +72,9 @@ func addTokenCmd(args []string) {
 		fatalf("保存凭证库失败: %v", err)
 	}
 	if added {
-		fmt.Printf(">>> 已新增账号 %s，可用于 collect 多账号并发采集。\n", name)
+		fmt.Println(">>> 已新增凭证，可用于 collect 多账号并发采集。")
 	} else {
-		fmt.Printf(">>> 账号 %s 已在凭证库中，未重复写入。\n", name)
+		fmt.Println(">>> 该凭证已在凭证库中，未重复写入。")
 	}
 }
 
@@ -96,7 +92,11 @@ func listTokensCmd(args []string) {
 		fatalf("打开凭证库失败: %v", err)
 	}
 
-	fmt.Printf("凭证库(%s)：共 %d 个账号，主账号=%s\n", *accountsFile, len(st.Accounts), st.Primary)
+	primary := "未设置"
+	if p := st.PrimaryToken(); p != "" {
+		primary = tokenpool.Format(p, *showPlain)
+	}
+	fmt.Printf("凭证库(%s)：共 %d 条凭证，主账号：%s\n", *accountsFile, len(st.Tokens), primary)
 	st.PrintAccounts(os.Stdout, *showPlain)
 }
 
@@ -119,53 +119,51 @@ func setPrimaryCmd(args []string) {
 		st.PrintAccounts(os.Stdout, false)
 		fatalf("请通过 --token 指定要设为主账号的凭证")
 	}
-	if err := st.SetPrimaryByToken(tk); err != nil {
+	if err := st.SetPrimary(tk); err != nil {
 		fatalf("设置主账号失败: %v", err)
 	}
 	if err := st.Save(); err != nil {
 		fatalf("保存凭证库失败: %v", err)
 	}
-	fmt.Printf(">>> 已设置主账号(primary): %s，exam 默认使用该账号。\n", st.Primary)
+	fmt.Println(">>> 已设置主账号，exam 默认使用该凭证。")
 }
 
 func rmTokenCmd(args []string) {
 	fs := flag.NewFlagSet("rmtoken", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	accountsFile := fs.String("accounts", tokenpool.DefaultAccountsFile, "accounts store file path")
-	alias := fs.String("alias", "", "alias of the account to remove")
 	token := fs.String("token", "", "token of the account to remove")
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
 
-	target := strings.TrimSpace(*alias)
-	if target == "" {
-		target = strings.TrimSpace(*token)
-	}
-	if target == "" {
-		fatalf("请通过 --alias 或 --token 指定要删除的账号")
+	tk := strings.TrimSpace(*token)
+	if tk == "" {
+		fatalf("请通过 --token 指定要删除的凭证（可用 listtokens --show-plain 查看完整 token）")
 	}
 
 	st, err := tokenpool.LoadStore(*accountsFile)
 	if err != nil {
 		fatalf("打开凭证库失败: %v", err)
 	}
-	name, err := st.RemoveAccount(target)
-	if err != nil {
-		fatalf("删除账号失败: %v", err)
+	wasPrimary := st.PrimaryToken() == tk
+	if err := st.RemoveToken(tk); err != nil {
+		fatalf("删除凭证失败: %v", err)
 	}
 	if err := st.Save(); err != nil {
 		fatalf("保存凭证库失败: %v", err)
 	}
-	fmt.Printf(">>> 已删除账号 %s。\n", name)
-	if st.Primary == "" {
+	fmt.Println(">>> 已删除该凭证。")
+	if wasPrimary {
 		fmt.Println(">>> 注意：删除的是主账号，请重新 login 或 setprimary 设置新的主账号。")
 	}
 }
 
-func getFinalTokenURL(rawURL string) string {
+// getFinalTokenURL 解析 --url 或凭证库主账号。
+// 返回 (入口 URL, 来源凭证 token)；--url 手动指定时第二值为空串。
+func getFinalTokenURL(rawURL string) (string, string) {
 	if rawURL != "" {
-		return rawURL
+		return rawURL, ""
 	}
 	st, err := tokenpool.LoadStore(tokenpool.DefaultAccountsFile)
 	if err != nil {
@@ -173,7 +171,7 @@ func getFinalTokenURL(rawURL string) string {
 	}
 	token := st.PrimaryToken()
 	if token == "" {
-		fatalf("凭证库中没有主账号，请先执行 login 或通过 --url 提供带 token 的网址")
+		fatalf("不存在主账户，请先执行 login")
 	}
-	return sklclient.TokenURL(token)
+	return sklclient.TokenURL(token), token
 }

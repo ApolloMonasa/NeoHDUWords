@@ -12,10 +12,12 @@ import (
 	"hduwords/internal/store"
 )
 
-// WorkerSpec 一个收集 worker：Tag 用于日志前缀，Client 绑定一个账号。
+// WorkerSpec 一个收集 worker：Tag 用于日志前缀，Client 绑定一个账号，
+// Token 是该账号的凭证（供失效时从凭证库删除）。
 type WorkerSpec struct {
 	Tag    string
 	Client *sklclient.Client
+	Token  string
 }
 
 // BuildWorkers 依据凭证池（优先）或显式 token URL 构造收集 worker 列表。
@@ -43,7 +45,7 @@ func BuildWorkers(poolTokens []string, rawURL string, workers int, opt sklclient
 			log(LevelError, "[%s] 初始化客户端失败: %v", tag, err)
 			continue
 		}
-		specs = append(specs, WorkerSpec{Tag: tag, Client: cl})
+		specs = append(specs, WorkerSpec{Tag: tag, Client: cl, Token: sklclient.TokenFromURL(urls[i])})
 	}
 	return specs
 }
@@ -55,6 +57,9 @@ type CollectPoolOptions struct {
 	Cooldown time.Duration
 	Retry    SubmitRetryConfig
 	Log      LogFunc
+	// OnTokenInvalid 在某个 worker 的凭证被判定失效（登录过期）时被调用，
+	// 参数为该 worker 的 token；前端用它把凭证从库中删除。
+	OnTokenInvalid func(token string)
 }
 
 // RunCollectPool 并发运行收集 worker，阻塞直到 ctx 被取消且所有 worker 退出。
@@ -69,7 +74,7 @@ func RunCollectPool(ctx context.Context, opts CollectPoolOptions) {
 		wg.Add(1)
 		go func(spec WorkerSpec) {
 			defer wg.Done()
-			runCollectLoop(ctx, spec.Tag, spec.Client, opts.Store, opts.Cooldown, retryCfg, log)
+			runCollectLoop(ctx, spec, opts.Store, opts.Cooldown, retryCfg, log, opts.OnTokenInvalid)
 		}(spec)
 	}
 
@@ -89,7 +94,7 @@ func RunCollectPool(ctx context.Context, opts CollectPoolOptions) {
 	}
 }
 
-func runCollectLoop(ctx context.Context, workerTag string, cl *sklclient.Client, st *store.Store, cooldown time.Duration, retryCfg SubmitRetryConfig, log LogFunc) {
+func runCollectLoop(ctx context.Context, spec WorkerSpec, st *store.Store, cooldown time.Duration, retryCfg SubmitRetryConfig, log LogFunc, onInvalid func(string)) {
 	round := 1
 	for {
 		select {
@@ -98,11 +103,14 @@ func runCollectLoop(ctx context.Context, workerTag string, cl *sklclient.Client,
 		default:
 		}
 
-		log(LevelRound, "[%s] 第 %d 轮开始", workerTag, round)
-		err := runCollectRound(ctx, workerTag, cl, st, retryCfg, log)
+		log(LevelRound, "[%s] 第 %d 轮开始", spec.Tag, round)
+		err := runCollectRound(ctx, spec.Tag, spec.Client, st, retryCfg, log)
 		if err != nil {
 			if sklclient.IsAuthError(err) {
-				log(LevelError, "[%s] 登录凭证可能已失效，请重新执行 login 后再收集；本 worker 退出（%v）", workerTag, err)
+				log(LevelError, "[%s] 登录过期，已从凭证库删除该凭证，本 worker 退出（%v）", spec.Tag, err)
+				if onInvalid != nil {
+					onInvalid(spec.Token)
+				}
 				return
 			}
 			var apiErr *sklclient.APIError
@@ -115,16 +123,16 @@ func runCollectLoop(ctx context.Context, workerTag string, cl *sklclient.Client,
 			}
 			if shouldDynamicCooldown {
 				waitTime = calcDynamicCooldown(errText, cooldown)
-				log(LevelWarn, "[%s] 频率限制或创建失败，动态冷却=%v，原因=%v", workerTag, waitTime, err)
+				log(LevelWarn, "[%s] 频率限制或创建失败，动态冷却=%v，原因=%v", spec.Tag, waitTime, err)
 			} else {
-				log(LevelError, "[%s] 本轮失败: %v", workerTag, err)
+				log(LevelError, "[%s] 本轮失败: %v", spec.Tag, err)
 			}
-			log(LevelInfo, "[%s] 冷却等待 %v", workerTag, waitTime)
+			log(LevelInfo, "[%s] 冷却等待 %v", spec.Tag, waitTime)
 			if werr := waitWithContext(ctx, waitTime); werr != nil {
 				return
 			}
 		} else {
-			log(LevelOK, "[%s] 本轮完成，等待 %v 后进入下一轮", workerTag, cooldown)
+			log(LevelOK, "[%s] 本轮完成，等待 %v 后进入下一轮", spec.Tag, cooldown)
 			if werr := waitWithContext(ctx, cooldown); werr != nil {
 				return
 			}

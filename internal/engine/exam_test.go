@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -320,7 +321,7 @@ func TestRunExam_AuthErrorHint(t *testing.T) {
 		Retry:  SubmitRetryConfig{MaxRetries: 1, Interval: time.Millisecond}.Normalized(),
 		Log:    testLogger(t),
 	})
-	if err == nil || !strings.Contains(err.Error(), "请重新 login") {
-		t.Fatalf("expected auth hint error, got %v", err)
+	if err == nil || !errors.Is(err, ErrLoginExpired) || !strings.Contains(err.Error(), "登录过期") {
+		t.Fatalf("expected ErrLoginExpired, got %v", err)
 	}
 }

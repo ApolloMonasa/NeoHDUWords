@@ -15,6 +15,10 @@ import (
 // errRecreatePaper 是哨兵错误：当前试卷 403 失效，需新建试卷后整体重试本轮。
 var errRecreatePaper = errors.New("paper expired (403), recreate and retry")
 
+// ErrLoginExpired 表示登录凭证已失效（登录过期）。调用方收到后应把该凭证
+// 从凭证库删除，并提示用户重新 login。
+var ErrLoginExpired = errors.New("登录过期")
+
 // ExamOptions 是 RunExam 的全部参数。
 type ExamOptions struct {
 	Client           *sklclient.Client
@@ -32,7 +36,7 @@ type ExamOptions struct {
 func RunExam(ctx context.Context, opts ExamOptions) error {
 	err := runExamInner(ctx, opts)
 	if sklclient.IsAuthError(err) {
-		return fmt.Errorf("登录凭证可能已失效，请重新 login 后再考试: %w", err)
+		return fmt.Errorf("%w: %w", ErrLoginExpired, err)
 	}
 	return err
 }

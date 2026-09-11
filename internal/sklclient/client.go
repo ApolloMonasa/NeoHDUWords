@@ -20,6 +20,15 @@ const DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 // ExamMobileUserAgent 是移动端 UA；exam 模式强制使用。
 const ExamMobileUserAgent = "Mozilla/5.0 (Linux; Android 13; M2102J2SC Build/TKQ1.221114.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.0.0 Mobile Safari/537.36"
 
+// TokenFromURL 从带 token 查询参数的 URL 中提取 token；无 token 时返回空串。
+func TokenFromURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(u.Query().Get("token"))
+}
+
 // TokenURL 由 token 构造平台入口 URL。
 func TokenURL(token string) string {
 	return fmt.Sprintf("https://skl.hdu.edu.cn/?type=6&token=%s#/english/list", token)

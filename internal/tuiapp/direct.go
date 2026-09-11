@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -22,7 +23,6 @@ import (
 
 func runLoginDirect(reader *bufio.Reader) {
 	browserType := readString(reader, "浏览器种类（chrome/edge，留空自动检测）", "")
-	alias := readString(reader, "账号别名（可选，如学号；同名账号会被刷新凭证）", "")
 
 	token, err := browser.CaptureTokenByLogin(browserType)
 	if err != nil {
@@ -36,7 +36,7 @@ func runLoginDirect(reader *bufio.Reader) {
 		fmt.Printf("打开凭证库失败：%v\n", err)
 		return
 	}
-	name, action, err := st.LoginPrimary(token, alias)
+	action, err := st.LoginPrimary(token)
 	if err != nil {
 		fmt.Printf("写入凭证库失败：%v\n", err)
 		return
@@ -47,19 +47,16 @@ func runLoginDirect(reader *bufio.Reader) {
 	}
 	switch action {
 	case tokenpool.LoginSwitched:
-		fmt.Printf(">>> 账号 %s 已在凭证库中，已设为主账号（exam 默认使用）。\n", name)
-	case tokenpool.LoginRefreshed:
-		fmt.Printf(">>> 已刷新账号 %s 的凭证并设为主账号（exam 默认使用）。\n", name)
+		fmt.Println(">>> 该凭证已在凭证库中，已标记为主账号（exam 默认使用）。")
 	case tokenpool.LoginReplacedPrimary:
-		fmt.Printf(">>> 已刷新主账号 %s 的凭证（exam 默认使用）。\n", name)
+		fmt.Println(">>> 已刷新主账号凭证（exam 默认使用）。")
 	default:
-		fmt.Printf(">>> 已新增账号 %s 并设为主账号（exam 默认使用）。\n", name)
+		fmt.Println(">>> 已新增凭证并标记为主账号（exam 默认使用）。")
 	}
 }
 
 func runAddTokenDirect(reader *bufio.Reader) {
 	browserType := readString(reader, "浏览器种类（chrome/edge，留空自动检测）", "")
-	alias := readString(reader, "账号别名（可选，如学号）", "")
 
 	token, err := browser.CaptureTokenByLogin(browserType)
 	if err != nil {
@@ -73,7 +70,7 @@ func runAddTokenDirect(reader *bufio.Reader) {
 		fmt.Printf("打开凭证库失败：%v\n", err)
 		return
 	}
-	name, added, err := st.Upsert(token, alias, "")
+	added, err := st.Upsert(token)
 	if err != nil {
 		fmt.Printf("写入凭证库失败：%v\n", err)
 		return
@@ -83,9 +80,9 @@ func runAddTokenDirect(reader *bufio.Reader) {
 		return
 	}
 	if added {
-		fmt.Printf(">>> 已新增账号 %s，可用于 collect 并发采集。\n", name)
+		fmt.Println(">>> 已新增凭证，可用于 collect 并发采集。")
 	} else {
-		fmt.Printf(">>> 账号 %s 已在凭证库中，未重复写入。\n", name)
+		fmt.Println(">>> 该凭证已在凭证库中，未重复写入。")
 	}
 }
 
@@ -99,7 +96,11 @@ func runListTokensDirect(reader *bufio.Reader) {
 		return
 	}
 
-	fmt.Printf("凭证库(%s)：共 %d 个账号，主账号=%s\n", accountsFile, len(st.Accounts), st.Primary)
+	primary := "未设置"
+	if p := st.PrimaryToken(); p != "" {
+		primary = tokenpool.Format(p, showPlain)
+	}
+	fmt.Printf("凭证库(%s)：共 %d 条凭证，主账号：%s\n", accountsFile, len(st.Tokens), primary)
 	st.PrintAccounts(os.Stdout, showPlain)
 }
 
@@ -111,8 +112,8 @@ func runSetPrimaryDirect(reader *bufio.Reader) {
 		fmt.Printf("打开凭证库失败：%v\n", err)
 		return
 	}
-	if len(st.Accounts) == 0 {
-		fmt.Println("凭证库为空，请先登录添加账号")
+	if len(st.Tokens) == 0 {
+		fmt.Println("凭证库为空，请先登录添加凭证")
 		return
 	}
 
@@ -120,12 +121,12 @@ func runSetPrimaryDirect(reader *bufio.Reader) {
 
 	sel := readString(reader, "输入编号或完整 token", "")
 	var target string
-	if n, err := strconv.Atoi(sel); err == nil && n >= 1 && n <= len(st.Accounts) {
-		target = st.Accounts[n-1].Token
+	if n, err := strconv.Atoi(sel); err == nil && n >= 1 && n <= len(st.Tokens) {
+		target = st.Tokens[n-1].Token
 	} else {
 		target = sel
 	}
-	if err := st.SetPrimaryByToken(target); err != nil {
+	if err := st.SetPrimary(target); err != nil {
 		fmt.Printf("设置主账号失败：%v\n", err)
 		return
 	}
@@ -133,7 +134,7 @@ func runSetPrimaryDirect(reader *bufio.Reader) {
 		fmt.Printf("保存凭证库失败：%v\n", err)
 		return
 	}
-	fmt.Printf(">>> 已设置主账号(primary): %s，exam 默认使用该账号。\n", st.Primary)
+	fmt.Println(">>> 已设置主账号，exam 默认使用该凭证。")
 }
 
 func runRemoveTokenDirect(reader *bufio.Reader) {
@@ -144,31 +145,32 @@ func runRemoveTokenDirect(reader *bufio.Reader) {
 		fmt.Printf("打开凭证库失败：%v\n", err)
 		return
 	}
-	if len(st.Accounts) == 0 {
+	if len(st.Tokens) == 0 {
 		fmt.Println("凭证库为空")
 		return
 	}
 
+	wasPrimaryHint := st.PrimaryToken()
 	st.PrintAccounts(os.Stdout, false)
 
-	sel := readString(reader, "输入要删除账号的编号或完整 token", "")
+	sel := readString(reader, "输入要删除凭证的编号或完整 token", "")
 	var target string
-	if n, err := strconv.Atoi(sel); err == nil && n >= 1 && n <= len(st.Accounts) {
-		target = st.Accounts[n-1].Token
+	if n, err := strconv.Atoi(sel); err == nil && n >= 1 && n <= len(st.Tokens) {
+		target = st.Tokens[n-1].Token
 	} else {
 		target = sel
 	}
-	name, err := st.RemoveAccount(target)
-	if err != nil {
-		fmt.Printf("删除账号失败：%v\n", err)
+	wasPrimary := target == wasPrimaryHint
+	if err := st.RemoveToken(target); err != nil {
+		fmt.Printf("删除凭证失败：%v\n", err)
 		return
 	}
 	if err := st.Save(); err != nil {
 		fmt.Printf("保存凭证库失败：%v\n", err)
 		return
 	}
-	fmt.Printf(">>> 已删除账号 %s。\n", name)
-	if st.Primary == "" {
+	fmt.Println(">>> 已删除该凭证。")
+	if wasPrimary {
 		fmt.Println(">>> 注意：删除的是主账号，请重新登录或设置新的主账号。")
 	}
 }
@@ -203,7 +205,7 @@ func runCollectDirect(reader *bufio.Reader) {
 		return
 	}
 
-	specs := engine.BuildWorkers(acctStore.Tokens(), resolvePrimaryURL(), workers, sklclient.Options{
+	specs := engine.BuildWorkers(acctStore.AllTokens(), resolvePrimaryURL(), workers, sklclient.Options{
 		BaseUserAgent: ua,
 		Timeout:       timeout,
 		MaxRPS:        rate,
@@ -220,6 +222,11 @@ func runCollectDirect(reader *bufio.Reader) {
 		Cooldown: cooldown,
 		Retry:    retryCfg,
 		Log:      collectLog,
+		OnTokenInvalid: func(token string) {
+			if err := tokenpool.RemoveTokenPersistent(accountsFile, token); err != nil {
+				collectLog("WARN", "删除失效凭证失败: %v", err)
+			}
+		},
 	})
 	fmt.Println("收集已停止，返回主菜单")
 }
@@ -246,11 +253,12 @@ func runExamDirect(reader *bufio.Reader) {
 	}
 	defer st.Close()
 
-	finalURL := resolvePrimaryURL()
-	if finalURL == "" {
-		fmt.Println("凭证库中没有主账号，请先登录（主菜单 1）")
+	primaryTok := primaryTokenTUI()
+	if primaryTok == "" {
+		fmt.Println("不存在主账户，请先登录（主菜单 1）")
 		return
 	}
+	finalURL := sklclient.TokenURL(primaryTok)
 	cl, err := sklclient.NewFromTokenURL(finalURL, sklclient.Options{BaseUserAgent: sklclient.ExamMobileUserAgent, Timeout: timeout, MaxRPS: rate})
 	if err != nil {
 		fmt.Printf("初始化客户端失败：%v\n", err)
@@ -266,6 +274,13 @@ func runExamDirect(reader *bufio.Reader) {
 		Retry:            retryCfg,
 		Log:              collectLog,
 	}); err != nil {
+		if errors.Is(err, engine.ErrLoginExpired) {
+			if rmErr := tokenpool.RemoveTokenPersistent(tokenpool.DefaultAccountsFile, primaryTok); rmErr != nil {
+				collectLog("WARN", "删除失效凭证失败: %v", rmErr)
+			}
+			fmt.Println("登录过期，已删除失效的主账号凭证，请重新登录（主菜单 1）")
+			return
+		}
 		fmt.Printf("考试失败：%v\n", err)
 	}
 }
@@ -367,13 +382,18 @@ func runDBUpdateDirect() {
 	os.Remove(dest + "-shm")
 }
 
-// resolvePrimaryURL 返回凭证库主账号的平台入口 URL；无主账号时返回空串。
-func resolvePrimaryURL() string {
+// primaryTokenTUI 返回凭证库主账号 token；无凭证库或无主账号时返回空串。
+func primaryTokenTUI() string {
 	st, err := tokenpool.LoadStore(tokenpool.DefaultAccountsFile)
 	if err != nil {
 		return ""
 	}
-	if token := st.PrimaryToken(); token != "" {
+	return st.PrimaryToken()
+}
+
+// resolvePrimaryURL 返回凭证库主账号的平台入口 URL；无主账号时返回空串。
+func resolvePrimaryURL() string {
+	if token := primaryTokenTUI(); token != "" {
 		return sklclient.TokenURL(token)
 	}
 	return ""
