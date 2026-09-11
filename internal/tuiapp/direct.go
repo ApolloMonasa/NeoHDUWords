@@ -357,9 +357,13 @@ func runDBConflictsDirect(reader *bufio.Reader) {
 	}
 	fmt.Printf("共 %d 条冲突（按观测时间倒序）：\n\n", len(conflicts))
 	for i, c := range conflicts {
+		observed := "未知"
+		if !c.ObservedAt.IsZero() {
+			observed = c.ObservedAt.Format("2006-01-02 15:04")
+		}
 		fmt.Printf("%d. %s\n", i+1, c.Stem)
 		fmt.Printf("   旧答案 %q → 新答案 %q（当前采用 %q），观测于 %s，来源 %s\n",
-			c.OldCorrect, c.NewCorrect, c.Current, c.ObservedAt, c.Source)
+			c.OldCorrect, c.NewCorrect, c.Current, observed, c.Source)
 	}
 }
 

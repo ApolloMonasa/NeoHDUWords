@@ -294,7 +294,7 @@ func collectCmd(args []string) {
 		ua             = fs.String("ua", sklclient.DefaultUserAgent, "user-agent")
 		cooldown       = fs.Duration("cooldown", 5*time.Minute, "cooldown between rounds")
 		accounts       = fs.String("accounts", tokenpool.DefaultAccountsFile, "accounts store file path")
-		workers        = fs.Int("workers", 0, "collect workers: 0=auto (pool size, or 1 when pool empty), >0=min(n, available tokens)")
+		workers        = fs.Int("workers", 0, "collect workers: 0=auto (one per stored token, or 1 when store is empty), >0=capped at n)")
 		submitRetries  = fs.Int("submit-retries", 3, "retry count for 403 on save/submit before creating new paper")
 		submitRetryInt = fs.Duration("submit-retry-interval", 10*time.Second, "wait duration between 403 retries on save/submit")
 	)
@@ -392,9 +392,13 @@ func dbConflictsCmd(args []string) {
 	}
 	fmt.Printf("共 %d 条冲突（按观测时间倒序）：\n\n", len(conflicts))
 	for i, c := range conflicts {
+		observed := "未知"
+		if !c.ObservedAt.IsZero() {
+			observed = c.ObservedAt.Format("2006-01-02 15:04")
+		}
 		fmt.Printf("%d. %s\n", i+1, c.Stem)
 		fmt.Printf("   旧答案 %q → 新答案 %q（当前采用 %q），观测于 %s，来源 %s\n",
-			c.OldCorrect, c.NewCorrect, c.Current, c.ObservedAt, c.Source)
+			c.OldCorrect, c.NewCorrect, c.Current, observed, c.Source)
 	}
 }
 func dbUpdateCmd(args []string) {

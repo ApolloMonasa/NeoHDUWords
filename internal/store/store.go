@@ -134,8 +134,20 @@ type Conflict struct {
 	OldCorrect string
 	NewCorrect string
 	Current    string // 当前题库采用的答案
-	ObservedAt string
+	ObservedAt time.Time
 	Source     string
+}
+
+// observedAtLayouts 是历史写入用过的 DATETIME 文本格式。
+var observedAtLayouts = []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05"}
+
+func parseObservedAt(raw string) time.Time {
+	for _, layout := range observedAtLayouts {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 // ListConflicts 按观测时间倒序返回答案冲突记录。
@@ -156,10 +168,14 @@ LIMIT ?
 
 	res := make([]Conflict, 0)
 	for rows.Next() {
-		var c Conflict
-		if err := rows.Scan(&c.Stem, &c.OldCorrect, &c.NewCorrect, &c.Current, &c.ObservedAt, &c.Source); err != nil {
+		var (
+			c        Conflict
+			observed string
+		)
+		if err := rows.Scan(&c.Stem, &c.OldCorrect, &c.NewCorrect, &c.Current, &observed, &c.Source); err != nil {
 			return nil, err
 		}
+		c.ObservedAt = parseObservedAt(observed)
 		res = append(res, c)
 	}
 	return res, rows.Err()

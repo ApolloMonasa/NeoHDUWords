@@ -144,4 +144,7 @@ func TestListConflicts(t *testing.T) {
 	if c.Stem != "stem-1" || c.OldCorrect != "a" || c.NewCorrect != "c" || c.Current != "c" || c.Source != "s2" {
 		t.Fatalf("unexpected conflict record: %+v", c)
 	}
+	if c.ObservedAt.IsZero() {
+		t.Fatal("expected ObservedAt to parse into time.Time")
+	}
 }

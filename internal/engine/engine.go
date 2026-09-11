@@ -38,3 +38,11 @@ func (c SubmitRetryConfig) Normalized() SubmitRetryConfig {
 	}
 	return c
 }
+
+// orNoopLog 保证返回非空日志函数，防止调用方漏传 Log 时 panic。
+func orNoopLog(log LogFunc) LogFunc {
+	if log == nil {
+		return func(level, format string, args ...any) {}
+	}
+	return log
+}

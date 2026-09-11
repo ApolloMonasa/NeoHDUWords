@@ -237,7 +237,11 @@ func (s *Store) PrintAccounts(w io.Writer, plain bool) {
 		if a.Primary {
 			role = "primary"
 		}
-		fmt.Fprintf(w, "%d. (%s) %s  添加于 %s\n", i+1, role, Format(a.Token, plain), a.AddedAt.Format("2006-01-02"))
+		added := "未知"
+		if !a.AddedAt.IsZero() {
+			added = a.AddedAt.Format("2006-01-02")
+		}
+		fmt.Fprintf(w, "%d. (%s) %s  添加于 %s\n", i+1, role, Format(a.Token, plain), added)
 	}
 }
 

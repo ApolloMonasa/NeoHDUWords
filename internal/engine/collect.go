@@ -24,6 +24,7 @@ type WorkerSpec struct {
 // workers 为 0 表示自动（每个可用 token 一个），>0 时作为 worker 数上限。
 // 某个 token 初始化失败只记录错误并跳过，不影响其他 worker。
 func BuildWorkers(poolTokens []string, rawURL string, workers int, opt sklclient.Options, log LogFunc) []WorkerSpec {
+	log = orNoopLog(log)
 	urls := make([]string, 0)
 	if len(poolTokens) > 0 {
 		for _, tk := range poolTokens {
@@ -64,7 +65,7 @@ type CollectPoolOptions struct {
 
 // RunCollectPool 并发运行收集 worker，阻塞直到 ctx 被取消且所有 worker 退出。
 func RunCollectPool(ctx context.Context, opts CollectPoolOptions) {
-	log := opts.Log
+	log := orNoopLog(opts.Log)
 	retryCfg := opts.Retry.Normalized()
 	log(LevelInfo, "进入收集模式：workers=%d cooldown=%v submitRetries=%d retryInterval=%v，按 Ctrl+C 退出",
 		len(opts.Workers), opts.Cooldown, retryCfg.MaxRetries, retryCfg.Interval)

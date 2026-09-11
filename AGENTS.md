@@ -5,6 +5,8 @@
 
 ## 常用命令
 
+- **不要在仓库根目录跑 `go build ./...`**——它会把 `cmd/hduwords` 的产物以 `hduwords` 之名写进当前目录。验证一律用 `go build ./cmd/...` 或显式 `go build -o cli ./cmd/hduwords`。
+
 ```bash
 go build -o cli ./cmd/hduwords   # CLI 入口
 go build -o tui ./cmd/tui        # TUI 入口

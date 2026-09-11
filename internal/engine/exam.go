@@ -34,6 +34,7 @@ type ExamOptions struct {
 // 内部对整体流程施加 max(WaitBeforeSubmit+15m, 20m) 的超时。
 // 任何阶段检测到凭证失效都会返回带"请重新 login"提示的错误。
 func RunExam(ctx context.Context, opts ExamOptions) error {
+	opts.Log = orNoopLog(opts.Log)
 	err := runExamInner(ctx, opts)
 	if sklclient.IsAuthError(err) {
 		return fmt.Errorf("%w: %w", ErrLoginExpired, err)
