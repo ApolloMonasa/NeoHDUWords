@@ -90,6 +90,8 @@ Commands:
 	db stats    查看本地题库统计信息（题目数、答案数、冲突数）
 	db export   导出完整题库（包含题干、选项、正确答案），可用于还原官方题库
 	db markdown, export-md, md 导出题库为 markdown 格式
+	db update  下载最新题库（保存到当前目录 hduwords.db）
+	db conflicts 查看答案冲突记录（同一题先后收集到不同答案）
 
 Options:
 	Login:

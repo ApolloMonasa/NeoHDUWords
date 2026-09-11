@@ -270,10 +270,7 @@ func runExamDirect(reader *bufio.Reader) {
 }
 
 func runDBStatsDirect(reader *bufio.Reader) {
-	dbPath, _ := readLine(reader, "数据库路径 [hduwords.db]")
-	if strings.TrimSpace(dbPath) == "" {
-		dbPath = "hduwords.db"
-	}
+	dbPath := readString(reader, "数据库路径 [hduwords.db]", "hduwords.db")
 	st, err := store.Open(dbPath)
 	if err != nil {
 		fmt.Printf("打开数据库失败：%v\n", err)
@@ -289,18 +286,12 @@ func runDBStatsDirect(reader *bufio.Reader) {
 }
 
 func runDBExportDirect(reader *bufio.Reader, markdown bool) {
-	dbPath, _ := readLine(reader, "数据库路径 [hduwords.db]")
-	if strings.TrimSpace(dbPath) == "" {
-		dbPath = "hduwords.db"
+	dbPath := readString(reader, "数据库路径 [hduwords.db]", "hduwords.db")
+	defOut := "export.json"
+	if markdown {
+		defOut = "export.md"
 	}
-	outPath, _ := readLine(reader, "输出文件")
-	if strings.TrimSpace(outPath) == "" {
-		if markdown {
-			outPath = "export.md"
-		} else {
-			outPath = "export.json"
-		}
-	}
+	outPath := readString(reader, "输出文件", defOut)
 	st, err := store.Open(dbPath)
 	if err != nil {
 		fmt.Printf("打开数据库失败：%v\n", err)
