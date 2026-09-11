@@ -69,7 +69,7 @@ func RunCollectPool(ctx context.Context, opts CollectPoolOptions) {
 		wg.Add(1)
 		go func(spec WorkerSpec) {
 			defer wg.Done()
-			runCollectLoop(ctx, spec.Tag, spec.Client, opts.Store, PaperTypePractice, opts.Cooldown, retryCfg, log)
+			runCollectLoop(ctx, spec.Tag, spec.Client, opts.Store, opts.Cooldown, retryCfg, log)
 		}(spec)
 	}
 
@@ -89,7 +89,7 @@ func RunCollectPool(ctx context.Context, opts CollectPoolOptions) {
 	}
 }
 
-func runCollectLoop(ctx context.Context, workerTag string, cl *sklclient.Client, st *store.Store, paperType int, cooldown time.Duration, retryCfg SubmitRetryConfig, log LogFunc) {
+func runCollectLoop(ctx context.Context, workerTag string, cl *sklclient.Client, st *store.Store, cooldown time.Duration, retryCfg SubmitRetryConfig, log LogFunc) {
 	round := 1
 	for {
 		select {
@@ -99,7 +99,7 @@ func runCollectLoop(ctx context.Context, workerTag string, cl *sklclient.Client,
 		}
 
 		log(LevelRound, "[%s] 第 %d 轮开始", workerTag, round)
-		err := runCollectRound(ctx, workerTag, cl, st, paperType, retryCfg, log)
+		err := runCollectRound(ctx, workerTag, cl, st, retryCfg, log)
 		if err != nil {
 			if sklclient.IsAuthError(err) {
 				log(LevelError, "[%s] 登录凭证可能已失效，请重新执行 login 后再收集；本 worker 退出（%v）", workerTag, err)
@@ -134,15 +134,15 @@ func runCollectLoop(ctx context.Context, workerTag string, cl *sklclient.Client,
 	}
 }
 
-func runCollectRound(ctx context.Context, workerTag string, cl *sklclient.Client, st *store.Store, paperType int, retryCfg SubmitRetryConfig, log LogFunc) error {
-	paper, err := cl.CreateFreshPaper(ctx, paperType)
+func runCollectRound(ctx context.Context, workerTag string, cl *sklclient.Client, st *store.Store, retryCfg SubmitRetryConfig, log LogFunc) error {
+	paper, err := cl.CreateFreshPaper(ctx, PaperTypePractice)
 	if err != nil {
 		var apiErr *sklclient.APIError
 		if errors.As(err, &apiErr) && (apiErr.Code == 2 || strings.Contains(apiErr.Msg, "短时间重试") || strings.Contains(apiErr.Msg, "上次申请时间")) {
 			return fmt.Errorf("PaperNew(fresh): %w", err)
 		}
 		log(LevelWarn, "[%s] 新建试卷失败，回退活跃试卷: %v", workerTag, err)
-		paper, err = cl.GetOrCreateActivePaper(ctx, paperType)
+		paper, err = cl.GetOrCreateActivePaper(ctx, PaperTypePractice)
 		if err != nil {
 			return fmt.Errorf("GetOrCreateActivePaper(fallback): %w", err)
 		}
@@ -208,7 +208,7 @@ func runCollectRound(ctx context.Context, workerTag string, cl *sklclient.Client
 			}); err != nil {
 				if attempt == 0 && IsForbiddenAPIError(err) {
 					log(LevelWarn, "[%s] PaperSave 返回 403，当前试卷可能失效，尝试新建试卷重试", workerTag)
-					newPaper, nerr := cl.CreateFreshPaper(ctx, paperType)
+					newPaper, nerr := cl.CreateFreshPaper(ctx, PaperTypePractice)
 					if nerr != nil {
 						return fmt.Errorf("PaperSave(submit): %w; PaperNew(retry): %w", err, nerr)
 					}
@@ -225,7 +225,7 @@ func runCollectRound(ctx context.Context, workerTag string, cl *sklclient.Client
 		}); err != nil {
 			if attempt == 0 && IsForbiddenAPIError(err) {
 				log(LevelWarn, "[%s] PaperSubmit 返回 403，当前试卷可能失效，尝试新建试卷重试", workerTag)
-				newPaper, nerr := cl.CreateFreshPaper(ctx, paperType)
+				newPaper, nerr := cl.CreateFreshPaper(ctx, PaperTypePractice)
 				if nerr != nil {
 					return fmt.Errorf("PaperSubmit: %w; PaperNew(retry): %w", err, nerr)
 				}

@@ -66,7 +66,7 @@ func TestSaveAndReload_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.PrimaryToken() != "tok-a" || len(loaded.Tokens()) != 1 || loaded.Migrated() {
+	if loaded.PrimaryToken() != "tok-a" || len(loaded.Tokens()) != 1 {
 		t.Fatalf("unexpected reload: %+v", loaded)
 	}
 
@@ -76,80 +76,6 @@ func TestSaveAndReload_RoundTrip(t *testing.T) {
 	}
 	if fi.Mode().Perm() != 0o600 {
 		t.Fatalf("expected 0600 perms, got %v", fi.Mode().Perm())
-	}
-}
-
-func TestMigrateLegacy_PoolAndMainToken(t *testing.T) {
-	dir := t.TempDir()
-	poolPath := filepath.Join(dir, ".tokens")
-	mainPath := filepath.Join(dir, ".token")
-	accountsPath := filepath.Join(dir, "accounts.json")
-
-	// 池里 2 个账号，primary 标记 tok-a；.token 是 tok-c（不在池中）
-	if err := os.WriteFile(poolPath, []byte("# pool\n*token-aaa\ntoken-bbb\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(mainPath, []byte("token-ccc\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	s, err := migrateLegacy(poolPath, mainPath, accountsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !s.Migrated() {
-		t.Fatal("expected migrated=true")
-	}
-	if len(s.Accounts) != 3 {
-		t.Fatalf("expected 3 accounts, got %+v", s.Accounts)
-	}
-	// .token 优先成为主账号
-	if s.PrimaryToken() != "token-ccc" {
-		t.Fatalf("expected .token as primary, got %q", s.PrimaryToken())
-	}
-	// 旧文件保留
-	for _, p := range []string{poolPath, mainPath} {
-		if _, err := os.Stat(p); err != nil {
-			t.Fatalf("legacy file should be kept: %v", err)
-		}
-	}
-	// accounts.json 已写出且可再次加载
-	reloaded, err := LoadStore(accountsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reloaded.Migrated() || reloaded.PrimaryToken() != "token-ccc" {
-		t.Fatalf("unexpected reload: %+v", reloaded)
-	}
-}
-
-func TestMigrateLegacy_MainTokenOnly(t *testing.T) {
-	dir := t.TempDir()
-	mainPath := filepath.Join(dir, ".token")
-	if err := os.WriteFile(mainPath, []byte("token-solo\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	s, err := migrateLegacy(filepath.Join(dir, ".tokens"), mainPath, filepath.Join(dir, "accounts.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !s.Migrated() || len(s.Accounts) != 1 || s.PrimaryToken() != "token-solo" {
-		t.Fatalf("unexpected migration result: %+v", s)
-	}
-}
-
-func TestMigrateLegacy_NothingToMigrate(t *testing.T) {
-	dir := t.TempDir()
-	s, err := migrateLegacy(filepath.Join(dir, ".tokens"), filepath.Join(dir, ".token"), filepath.Join(dir, "accounts.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s.Migrated() || len(s.Accounts) != 0 {
-		t.Fatalf("expected empty store, got %+v", s)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "accounts.json")); !os.IsNotExist(err) {
-		t.Fatal("empty store should not write accounts.json")
 	}
 }
 
@@ -244,7 +170,7 @@ func TestPrintAccounts(t *testing.T) {
 	var b strings.Builder
 	s.PrintAccounts(&b, false)
 	out := b.String()
-	if !strings.Contains(out, "(primary)") || !strings.Contains(out, "main") || !strings.Contains(out, "abcdef...stuv") || !strings.Contains(out, "学号123") {
+	if !strings.Contains(out, "(primary)") || !strings.Contains(out, "main") || !strings.Contains(out, "abcdef...qrstuv") || !strings.Contains(out, "学号123") {
 		t.Fatalf("unexpected output: %q", out)
 	}
 }

@@ -23,8 +23,6 @@ import (
 	"hduwords/internal/updater"
 )
 
-const defaultUpdateRepo = "ApolloMonasa/NeoHDUWords"
-
 func main() {
 	log.SetFlags(0)
 
@@ -127,7 +125,7 @@ Options:
 func updateCmd(args []string) {
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	repoFlag := fs.String("repo", defaultUpdateRepo, "github repo owner/name")
+	repoFlag := fs.String("repo", updatecheck.DefaultRepo, "github repo owner/name")
 	updatesDirFlag := fs.String("updates-dir", ".updates", "download directory for update archives")
 	yesFlag := fs.Bool("yes", false, "auto confirm install")
 	checkOnlyFlag := fs.Bool("check-only", false, "only check for updates")
@@ -147,9 +145,6 @@ func updateCmd(args []string) {
 		Reader:     bufio.NewReader(os.Stdin),
 		AutoYes:    *yesFlag,
 		CheckOnly:  *checkOnlyFlag,
-		ApplyArgs: func(source, target string) []string {
-			return []string{"apply-update", "--source", source, "--target", target}
-		},
 	}); err != nil {
 		fatalErr(err)
 	}
@@ -447,18 +442,7 @@ func dbMarkdownCmd(args []string) {
 		out = f
 	}
 
-	fmt.Fprintf(out, "# HDU Words 题库导出\n\n共 %d 题\n\n", len(items))
-	for i, item := range items {
-		fmt.Fprintf(out, "### %d. %s\n\n", i+1, item.Stem)
-		for j, opt := range item.Options {
-			prefix := "- [ ]"
-			if j == item.CorrectIndex {
-				prefix = "- [x]"
-			}
-			fmt.Fprintf(out, "%s %s. %s\n", prefix, string(rune('A'+j)), opt)
-		}
-		fmt.Fprintln(out)
-	}
+	st.ExportMarkdown(out, items)
 }
 
 func dbStatsCmd(args []string) {
@@ -528,18 +512,7 @@ func dbExportCmd(args []string) {
 			fatalErr(err)
 		}
 	case "markdown":
-		fmt.Fprintf(out, "# HDU Words 题库导出\n\n共 %d 题\n\n", len(items))
-		for i, item := range items {
-			fmt.Fprintf(out, "### %d. %s\n\n", i+1, item.Stem)
-			for j, opt := range item.Options {
-				prefix := "- [ ]"
-				if j == item.CorrectIndex {
-					prefix = "- [x]"
-				}
-				fmt.Fprintf(out, "%s %s. %s\n", prefix, string(rune('A'+j)), opt)
-			}
-			fmt.Fprintln(out)
-		}
+		st.ExportMarkdown(out, items)
 	default:
 		fatalf("unsupported format: %s", *format)
 	}

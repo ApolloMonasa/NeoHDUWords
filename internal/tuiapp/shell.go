@@ -14,14 +14,12 @@ import (
 	"hduwords/internal/updater"
 )
 
-const defaultTUIRepo = "ApolloMonasa/NeoHDUWords"
-
 var collectUseColor = shouldUseColor()
 
 func Run(args []string) error {
 	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	repoFlag := fs.String("repo", defaultTUIRepo, "github repo owner/name")
+	repoFlag := fs.String("repo", updatecheck.DefaultRepo, "github repo owner/name")
 	updatesDirFlag := fs.String("updates-dir", ".updates", "download directory for update archives")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -41,9 +39,6 @@ func Run(args []string) error {
 		BinaryName: "tui",
 		UpdatesDir: *updatesDirFlag,
 		Reader:     reader,
-		ApplyArgs: func(source, target string) []string {
-			return []string{"--apply-update", "--source", source, "--target", target}
-		},
 	})
 	if err != nil {
 		fmt.Printf("\n更新检查失败：%v\n", err)

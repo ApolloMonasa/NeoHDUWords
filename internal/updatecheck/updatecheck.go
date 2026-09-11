@@ -14,6 +14,9 @@ import (
 	"hduwords/internal/buildinfo"
 )
 
+// DefaultRepo 是默认发布仓库。
+const DefaultRepo = "ApolloMonasa/NeoHDUWords"
+
 type Repo struct {
 	Owner string
 	Name  string

@@ -15,17 +15,6 @@ type coded struct {
 
 func (c coded) APIErrorFields() (int, string) { return c.Code, c.Msg }
 
-func (c *Client) UserInfo(ctx context.Context, userType int) (map[string]any, error) {
-	q := url.Values{}
-	q.Set("type", strconv.Itoa(userType))
-	q.Set("index", "")
-	var out map[string]any
-	if err := c.do(ctx, "GET", "/api/userinfo", q, nil, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *Client) PaperList(ctx context.Context, paperType int) ([]PaperSummary, error) {
 	q := url.Values{}
 	q.Set("type", strconv.Itoa(paperType))

@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"io"
 	"time"
 
 	"hduwords/internal/match"
@@ -227,4 +229,20 @@ func (s *Store) Stats(ctx context.Context) (Stats, error) {
 		return Stats{}, err
 	}
 	return out, nil
+}
+
+// ExportMarkdown 把题库导出为 Markdown 复选框格式并写入 w。
+func (s *Store) ExportMarkdown(w io.Writer, items []ExportItem) {
+	fmt.Fprintf(w, "# HDU Words 题库导出\n\n共 %d 题\n\n", len(items))
+	for i, item := range items {
+		fmt.Fprintf(w, "### %d. %s\n\n", i+1, item.Stem)
+		for j, opt := range item.Options {
+			prefix := "- [ ]"
+			if j == item.CorrectIndex {
+				prefix = "- [x]"
+			}
+			fmt.Fprintf(w, "%s %s. %s\n", prefix, string(rune('A'+j)), opt)
+		}
+		fmt.Fprintln(w)
+	}
 }

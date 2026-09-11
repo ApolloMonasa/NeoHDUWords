@@ -27,10 +27,6 @@ type Options struct {
 	Reader     *bufio.Reader
 	AutoYes    bool // 跳过所有确认（CLI --yes）
 	CheckOnly  bool // 仅检查不安装
-	// ApplyArgs 生成安装助手进程的参数。两入口 flag 风格不同：
-	// CLI 为 ["apply-update", "--source", s, "--target", t]，
-	// TUI 为 ["--apply-update", "--source", s, "--target", t]。
-	ApplyArgs func(source, target string) []string
 }
 
 // Run 执行完整的更新交互流程。
@@ -106,7 +102,7 @@ func Run(ctx context.Context, opts Options) (installed bool, err error) {
 		fmt.Println("已取消安装（更新包保留在 " + dest + "）")
 		return false, nil
 	}
-	if err := InstallSelfUpdate(dest, opts.ApplyArgs); err != nil {
+	if err := InstallSelfUpdate(dest); err != nil {
 		return false, err
 	}
 	fmt.Println("更新已启动安装，程序将退出。")
@@ -155,8 +151,9 @@ func ShowStatus(status updatecheck.Status) {
 
 // InstallSelfUpdate 把自身复制到临时目录并以安装助手子进程执行替换：
 // 运行中的进程不能直接覆写自身（Windows 文件锁），由副本进程完成拷贝。
+// 助手协议统一为 "apply-update --source <新文件> --target <原文件>"（CLI/TUI 一致）。
 // Start 成功即返回；调用方随后退出。
-func InstallSelfUpdate(sourcePath string, applyArgs func(source, target string) []string) error {
+func InstallSelfUpdate(sourcePath string) error {
 	selfExe, err := os.Executable()
 	if err != nil {
 		return err
@@ -169,7 +166,7 @@ func InstallSelfUpdate(sourcePath string, applyArgs func(source, target string) 
 	if err := copyLocalFile(selfExe, helperPath); err != nil {
 		return err
 	}
-	cmd := exec.Command(helperPath, applyArgs(sourcePath, selfExe)...)
+	cmd := exec.Command(helperPath, "apply-update", "--source", sourcePath, "--target", selfExe)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

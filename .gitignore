@@ -1,4 +1,3 @@
-.\trae
 *.db
 *.db-wal
 *.db-shm
@@ -8,7 +7,6 @@
 .tokens
 accounts.json
 accounts.json.tmp
-docs/
 /tui
 /cli
 /hduwords

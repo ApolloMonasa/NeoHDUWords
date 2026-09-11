@@ -10,9 +10,7 @@
 //	  ]
 //	}
 //
-// 首次加载时若发现旧版 .tokens 文本池或 .token 单账号文件，会自动迁移到
-// accounts.json；旧文件原样保留（可手动删除），主账号以旧 .token 为准以保持
-// exam 行为不变。
+// 从旧版（.token/.tokens 时代）升级不迁移凭证：重新 login 一次即可。
 package tokenpool
 
 import (
@@ -41,8 +39,7 @@ type Store struct {
 	Primary  string    `json:"primary"` // 主账号的 alias
 	Accounts []Account `json:"accounts"`
 
-	path     string
-	migrated bool
+	path string
 }
 
 // LoadStore 读取凭证库；accounts.json 不存在时返回空库（首次 login/addtoken 时才落盘）。
@@ -63,46 +60,6 @@ func LoadStore(path string) (*Store, error) {
 		return nil, err
 	}
 	return &Store{Version: 1, path: path}, nil
-}
-
-// migrateLegacy 把旧版凭证迁移为统一凭证库。
-func migrateLegacy(poolPath, mainPath, accountsPath string) (*Store, error) {
-	s := &Store{Version: 1, path: accountsPath}
-
-	pool, err := loadLegacyPool(poolPath)
-	if err != nil {
-		return nil, err
-	}
-	aliasOf := make(map[string]string)
-	for _, tk := range pool.Tokens {
-		alias := fmt.Sprintf("acct-%d", len(s.Accounts)+1)
-		s.Accounts = append(s.Accounts, Account{Alias: alias, Token: tk, AddedAt: time.Now()})
-		aliasOf[tk] = alias
-		if pool.Primary != "" && tk == pool.Primary {
-			s.Primary = alias
-		}
-	}
-
-	// 旧 .token 是 exam 实际使用的主账号，迁移后仍以它为主
-	mainTok, _ := LoadMain(mainPath)
-	if mainTok != "" {
-		if alias, ok := aliasOf[mainTok]; ok {
-			s.Primary = alias
-		} else {
-			alias := fmt.Sprintf("acct-%d", len(s.Accounts)+1)
-			s.Accounts = append(s.Accounts, Account{Alias: alias, Token: mainTok, AddedAt: time.Now()})
-			s.Primary = alias
-		}
-	}
-
-	if len(s.Accounts) == 0 {
-		return s, nil
-	}
-	if err := s.Save(); err != nil {
-		return nil, err
-	}
-	s.migrated = true
-	return s, nil
 }
 
 // Save 以 0600 权限原子写回凭证库（先写临时文件再改名）。
@@ -279,8 +236,17 @@ func (s *Store) PrintAccounts(w io.Writer, plain bool) {
 	}
 }
 
-// Migrated 表示本次加载发生了旧格式自动迁移。
-func (s *Store) Migrated() bool { return s.migrated }
-
 // Path 返回凭证库文件路径。
 func (s *Store) Path() string { return s.path }
+
+// Format 打码显示凭证；plain 为 true 或凭证长度不超过 12 时原样返回。
+func Format(token string, plain bool) string {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return "(empty)"
+	}
+	if plain || len(token) <= 12 {
+		return token
+	}
+	return token[:6] + "..." + token[len(token)-6:]
+}

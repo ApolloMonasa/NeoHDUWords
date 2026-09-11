@@ -319,18 +319,7 @@ func runDBExportDirect(reader *bufio.Reader, markdown bool) {
 	}
 	defer f.Close()
 	if markdown {
-		fmt.Fprintf(f, "# HDU Words 题库导出\n\n共 %d 题\n\n", len(items))
-		for i, item := range items {
-			fmt.Fprintf(f, "### %d. %s\n\n", i+1, item.Stem)
-			for j, opt := range item.Options {
-				prefix := "- [ ]"
-				if j == item.CorrectIndex {
-					prefix = "- [x]"
-				}
-				fmt.Fprintf(f, "%s %s. %s\n", prefix, string(rune('A'+j)), opt)
-			}
-			fmt.Fprintln(f)
-		}
+		st.ExportMarkdown(f, items)
 		return
 	}
 	enc := json.NewEncoder(f)

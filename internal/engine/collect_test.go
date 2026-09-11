@@ -101,7 +101,7 @@ func TestRunCollectRound_UpsertsOfficialAnswers(t *testing.T) {
 	defer srv.Close()
 	cl := newTestClient(t, srv)
 
-	err := runCollectRound(ctx, "w01", cl, st, PaperTypePractice,
+	err := runCollectRound(ctx, "w01", cl, st,
 		SubmitRetryConfig{MaxRetries: 1, Interval: time.Millisecond}.Normalized(), testLogger(t))
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +181,7 @@ func TestRunCollectRound_Save403RecreatesPaper(t *testing.T) {
 	defer srv.Close()
 	cl := newTestClient(t, srv)
 
-	err := runCollectRound(ctx, "w01", cl, st, PaperTypePractice,
+	err := runCollectRound(ctx, "w01", cl, st,
 		SubmitRetryConfig{MaxRetries: 0}.Normalized(), testLogger(t))
 	if err != nil {
 		t.Fatal(err)
@@ -302,7 +302,7 @@ func TestRunCollectRound_FallbackToActivePaper(t *testing.T) {
 	defer srv.Close()
 	cl := newTestClient(t, srv)
 
-	err := runCollectRound(ctx, "w01", cl, st, PaperTypePractice,
+	err := runCollectRound(ctx, "w01", cl, st,
 		SubmitRetryConfig{MaxRetries: 1, Interval: time.Millisecond}.Normalized(), testLogger(t))
 	if err != nil {
 		t.Fatal(err)

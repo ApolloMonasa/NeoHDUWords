@@ -72,7 +72,7 @@ func LatestRelease(ctx context.Context, repo Repo) (Release, error) {
 func DBAsset() ReleaseAsset {
 	return ReleaseAsset{
 		Name: "hduwords.db",
-		URL:  "https://github.com/ApolloMonasa/NeoHDUWords/releases/download/Data/hduwords.db",
+		URL:  "https://github.com/" + DefaultRepo + "/releases/download/Data/hduwords.db",
 	}
 }
 
