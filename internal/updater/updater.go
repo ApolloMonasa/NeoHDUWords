@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"hduwords/internal/buildinfo"
+	"hduwords/internal/ui"
 	"hduwords/internal/updatecheck"
 )
 
@@ -54,7 +55,7 @@ func Run(ctx context.Context, opts Options) (installed bool, err error) {
 	}
 
 	// 单次确认：同意后自动完成下载 → 校验 → 安装（--yes 跳过询问）
-	if !opts.AutoYes && !PromptYesNo(opts.Reader, "检测到更新，是否下载并安装？", false) {
+	if !opts.AutoYes && !ui.PromptYesNo(opts.Reader, "检测到更新，是否下载并安装？", false) {
 		fmt.Println("已取消更新")
 		return false, nil
 	}
@@ -104,21 +105,6 @@ func Run(ctx context.Context, opts Options) (installed bool, err error) {
 	}
 	fmt.Println("更新已启动安装，程序将退出。")
 	return true, nil
-}
-
-// PromptYesNo 输出 prompt 并从 reader 读取 y/n；空输入返回默认值。
-func PromptYesNo(reader *bufio.Reader, prompt string, defaultYes bool) bool {
-	defaultLabel := "y/N"
-	if defaultYes {
-		defaultLabel = "Y/n"
-	}
-	fmt.Printf("%s [%s]: ", prompt, defaultLabel)
-	line, _ := reader.ReadString('\n')
-	line = strings.ToLower(strings.TrimSpace(line))
-	if line == "" {
-		return defaultYes
-	}
-	return line == "y" || line == "yes" || line == "1" || line == "true"
 }
 
 // ShowStatus 打印本地/远端版本状态。

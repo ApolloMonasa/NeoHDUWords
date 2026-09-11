@@ -17,8 +17,8 @@ import (
 	"hduwords/internal/sklclient"
 	"hduwords/internal/store"
 	"hduwords/internal/tokenpool"
+	"hduwords/internal/ui"
 	"hduwords/internal/updatecheck"
-	"hduwords/internal/updater"
 )
 
 func runLoginDirect(reader *bufio.Reader) {
@@ -87,7 +87,7 @@ func runAddTokenDirect(reader *bufio.Reader) {
 }
 
 func runListTokensDirect(reader *bufio.Reader) {
-	showPlain := updater.PromptYesNo(reader, "是否显示完整 token 文本？", false)
+	showPlain := ui.PromptYesNo(reader, "是否显示完整 token 文本？", false)
 
 	st, err := tokenpool.LoadStore(tokenpool.DefaultAccountsFile)
 	if err != nil {
@@ -203,7 +203,7 @@ func runCollectDirect(reader *bufio.Reader) {
 		BaseUserAgent: ua,
 		Timeout:       timeout,
 		MaxRPS:        rate,
-	}, collectLog)
+	}, ui.Log)
 	if len(specs) == 0 {
 		fmt.Println("凭证库为空，请先登录（主菜单 1）添加账号")
 		return
@@ -215,10 +215,10 @@ func runCollectDirect(reader *bufio.Reader) {
 		Store:    st,
 		Cooldown: cooldown,
 		Retry:    retryCfg,
-		Log:      collectLog,
+		Log:      ui.Log,
 		OnTokenInvalid: func(token string) {
 			if err := tokenpool.RemoveTokenPersistent(tokenpool.DefaultAccountsFile, token); err != nil {
-				collectLog("WARN", "删除失效凭证失败: %v", err)
+				ui.Log("WARN", "删除失效凭证失败: %v", err)
 			}
 		},
 	})
@@ -229,7 +229,7 @@ func runExamDirect(reader *bufio.Reader) {
 	dbPath := readString(reader, "数据库路径 [hduwords.db]", "hduwords.db")
 	waitBeforeSubmit := readDuration(reader, "交卷前等待时长 [30s]", 30*time.Second)
 	score := readInt(reader, "目标得分百分比 [-1]", -1)
-	dryRun := updater.PromptYesNo(reader, "是否 dry-run？", false)
+	dryRun := ui.PromptYesNo(reader, "是否 dry-run？", false)
 	rate := readFloat(reader, "请求速率 [2]", 2)
 	timeout := readDuration(reader, "超时 [15s]", 15*time.Second)
 	submitRetries := readInt(reader, "提交 403 重试次数 [3]", 3)
@@ -266,11 +266,11 @@ func runExamDirect(reader *bufio.Reader) {
 		TargetScore:      score,
 		DryRun:           dryRun,
 		Retry:            retryCfg,
-		Log:              collectLog,
+		Log:              ui.Log,
 	}); err != nil {
 		if errors.Is(err, engine.ErrLoginExpired) {
 			if rmErr := tokenpool.RemoveTokenPersistent(tokenpool.DefaultAccountsFile, primaryTok); rmErr != nil {
-				collectLog("WARN", "删除失效凭证失败: %v", rmErr)
+				ui.Log("WARN", "删除失效凭证失败: %v", rmErr)
 			}
 			fmt.Println("登录过期，已删除失效的主账号凭证，请重新登录（主菜单 1）")
 			return

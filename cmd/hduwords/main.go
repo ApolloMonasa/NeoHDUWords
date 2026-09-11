@@ -19,6 +19,7 @@ import (
 	"hduwords/internal/sklclient"
 	"hduwords/internal/store"
 	"hduwords/internal/tokenpool"
+	"hduwords/internal/ui"
 	"hduwords/internal/updatecheck"
 	"hduwords/internal/updater"
 )
@@ -194,9 +195,9 @@ func runExamCmd(args []string) {
 	finalURL, primaryTok := getFinalTokenURL(*rawURL)
 	retryCfg := engine.SubmitRetryConfig{MaxRetries: *submitRetries, Interval: *submitRetryInt}.Normalized()
 
-	collectLog("INFO", "exam 模式启动: type=%d db=%s dryRun=%v submitRetries=%d retryInterval=%v",
+	ui.Log("INFO", "exam 模式启动: type=%d db=%s dryRun=%v submitRetries=%d retryInterval=%v",
 		engine.PaperTypeExam, *dbPath, *dryRun, retryCfg.MaxRetries, retryCfg.Interval)
-	collectLog("INFO", "exam 参数: time=%v score=%d", *examTime, *examScore)
+	ui.Log("INFO", "exam 参数: time=%v score=%d", *examTime, *examScore)
 
 	// Ctrl+C 可中断等待与请求
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -224,61 +225,17 @@ func runExamCmd(args []string) {
 		TargetScore:      *examScore,
 		DryRun:           *dryRun,
 		Retry:            retryCfg,
-		Log:              collectLog,
+		Log:              ui.Log,
 	}); err != nil {
 		// 登录过期：删除失效的主账号凭证后提示重新登录
 		if errors.Is(err, engine.ErrLoginExpired) && primaryTok != "" {
 			if rmErr := tokenpool.RemoveTokenPersistent(tokenpool.DefaultAccountsFile, primaryTok); rmErr != nil {
-				collectLog("WARN", "删除失效凭证失败: %v", rmErr)
+				ui.Log("WARN", "删除失效凭证失败: %v", rmErr)
 			}
 			fatalf("登录过期，已删除失效的主账号凭证，请重新 login")
 		}
 		fatalErr(err)
 	}
-}
-
-var collectUseColor = shouldUseColor()
-
-func shouldUseColor() bool {
-	if os.Getenv("NO_COLOR") != "" {
-		return false
-	}
-	term := strings.ToLower(strings.TrimSpace(os.Getenv("TERM")))
-	if term == "dumb" {
-		return false
-	}
-	return true
-}
-
-func collectLog(level, format string, args ...any) {
-	ts := time.Now().Format("15:04:05")
-	msg := fmt.Sprintf(format, args...)
-	line := fmt.Sprintf("[%s] [%s] %s", ts, level, msg)
-	if collectUseColor {
-		line = colorizeCollectLine(level, line)
-	}
-	// 进度日志走 stdout；错误输出由 fatalf/fatalErr 走 stderr
-	fmt.Println(line)
-}
-
-func colorizeCollectLine(level, line string) string {
-	color := ""
-	switch level {
-	case "OK":
-		color = "32"
-	case "WARN":
-		color = "33"
-	case "ERROR":
-		color = "31"
-	case "ROUND":
-		color = "36"
-	default:
-		color = ""
-	}
-	if color == "" {
-		return line
-	}
-	return "\x1b[" + color + "m" + line + "\x1b[0m"
 }
 
 func collectCmd(args []string) {
@@ -323,7 +280,7 @@ func collectCmd(args []string) {
 		BaseUserAgent: *ua,
 		Timeout:       *timeout,
 		MaxRPS:        *rate,
-	}, collectLog)
+	}, ui.Log)
 	if len(workerSpecs) == 0 {
 		fatalf("可用 token 数为 0，请先执行 hduwords addtoken 或提供 --url")
 	}
@@ -333,10 +290,10 @@ func collectCmd(args []string) {
 		Store:    st,
 		Cooldown: *cooldown,
 		Retry:    retryCfg,
-		Log:      collectLog,
+		Log:      ui.Log,
 		OnTokenInvalid: func(token string) {
 			if err := tokenpool.RemoveTokenPersistent(tokenpool.DefaultAccountsFile, token); err != nil {
-				collectLog("WARN", "删除失效凭证失败: %v", err)
+				ui.Log("WARN", "删除失效凭证失败: %v", err)
 			}
 		},
 	})
@@ -352,7 +309,7 @@ func dbCmd(args []string) {
 	case "export":
 		dbExportCmd(args[1:])
 	case "markdown", "export-md", "md":
-		dbMarkdownCmd(args[1:])
+		dbExportCmd(append([]string{"--format", "markdown"}, args[1:]...))
 	case "update":
 		dbUpdateCmd(args[1:])
 	case "conflicts":
@@ -427,43 +384,6 @@ func dbUpdateCmd(args []string) {
 	// Remove stale WAL/SHM files so subsequent opens read the fresh db.
 	os.Remove(dest + "-wal")
 	os.Remove(dest + "-shm")
-}
-
-func dbMarkdownCmd(args []string) {
-	fs := flag.NewFlagSet("db markdown", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	dbPath := fs.String("db", "hduwords.db", "sqlite db path")
-	outFile := fs.String("out", "", "output file path (default stdout)")
-
-	if err := fs.Parse(args); err != nil {
-		os.Exit(2)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	st, err := store.Open(*dbPath)
-	if err != nil {
-		fatalErr(err)
-	}
-	defer st.Close()
-
-	items, err := st.Export(ctx)
-	if err != nil {
-		fatalErr(err)
-	}
-
-	out := os.Stdout
-	if *outFile != "" {
-		f, err := os.Create(*outFile)
-		if err != nil {
-			fatalErr(err)
-		}
-		defer f.Close()
-		out = f
-	}
-
-	st.ExportMarkdown(out, items)
 }
 
 func dbStatsCmd(args []string) {

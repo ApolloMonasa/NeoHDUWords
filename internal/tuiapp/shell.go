@@ -8,13 +8,11 @@ import (
 	"os"
 	"runtime"
 	"strings"
-	"time"
 
+	"hduwords/internal/ui"
 	"hduwords/internal/updatecheck"
 	"hduwords/internal/updater"
 )
-
-var collectUseColor = shouldUseColor()
 
 func Run(args []string) error {
 	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
@@ -63,13 +61,13 @@ func printSplash(repo updatecheck.Repo) {
 		"╚═╝  ╚═╝╚═════╝  ╚═════╝        ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚══════╝",
 		"      ░░░  T U I   M O D E  ░░░",
 	}
-	if shouldUseColor() {
+	if ui.UseColor() {
 		fmt.Print("\x1b[94m")
 	}
 	for _, line := range banner {
 		fmt.Println(line)
 	}
-	if shouldUseColor() {
+	if ui.UseColor() {
 		fmt.Print("\x1b[0m")
 	}
 	if v := updater.VersionString(); v != "" {
@@ -108,43 +106,6 @@ func menuLoop(reader *bufio.Reader) {
 			fmt.Println("无效选择")
 		}
 	}
-}
-
-func collectLog(level, format string, args ...any) {
-	ts := time.Now().Format("15:04:05")
-	msg := fmt.Sprintf(format, args...)
-	line := fmt.Sprintf("[%s] [%s] %s", ts, level, msg)
-	if collectUseColor {
-		line = colorizeCollectLine(level, line)
-	}
-	// 进度日志统一走 stdout，避免与 fmt 输出交错
-	fmt.Println(line)
-}
-
-func colorizeCollectLine(level, line string) string {
-	color := ""
-	switch level {
-	case "OK":
-		color = "32"
-	case "WARN":
-		color = "33"
-	case "ERROR":
-		color = "31"
-	case "ROUND":
-		color = "36"
-	}
-	if color == "" {
-		return line
-	}
-	return "\x1b[" + color + "m" + line + "\x1b[0m"
-}
-
-func shouldUseColor() bool {
-	if os.Getenv("NO_COLOR") != "" {
-		return false
-	}
-	term := strings.ToLower(strings.TrimSpace(os.Getenv("TERM")))
-	return term != "dumb"
 }
 
 func runDatabaseWizard(reader *bufio.Reader) {
