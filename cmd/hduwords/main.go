@@ -43,6 +43,8 @@ func main() {
 		listTokensCmd(os.Args[2:])
 	case "setprimary":
 		setPrimaryCmd(os.Args[2:])
+	case "rmtoken":
+		rmTokenCmd(os.Args[2:])
 	case "collect":
 		collectCmd(os.Args[2:])
 	case "exam":
@@ -69,6 +71,7 @@ Usage:
 	%[1]s addtoken [--browser chrome|edge] [--alias <name>]
 	%[1]s listtokens [--accounts accounts.json] [--show-plain]
 	%[1]s setprimary --token <token> [--accounts accounts.json]
+	%[1]s rmtoken (--alias <name> | --token <token>) [--accounts accounts.json]
 	%[1]s collect [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--ua <ua>] [--cooldown 5m] [--accounts accounts.json] [--workers 0] [--submit-retries 3] [--submit-retry-interval 10s]
 	%[1]s exam    [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--time 30s] [--score 100] [--dry-run] [--submit-retries 3] [--submit-retry-interval 10s]
 	%[1]s update  [--repo owner/name] [--updates-dir .updates] [--yes] [--check-only]
@@ -82,6 +85,7 @@ Commands:
 	addtoken   自动打开浏览器，登录后把凭证追加写入凭证库（用于 collect 多账号并发）
 	listtokens 查看凭证库账号列表及主账号标识
 	setprimary 设置凭证库的主账号，exam 默认使用该账号
+	rmtoken    删除凭证库中的账号（清理失效凭证）
 	collect    收集题库：支持凭证库多账号并发采集；收集与练习统一使用 type=0
 	exam       正式自动考试：基于本地题库进行正式考试作答
 	update     检查并安装最新 CLI 发行版（二进制更新）
@@ -307,7 +311,6 @@ func collectCmd(args []string) {
 	if err != nil {
 		fatalErr(fmt.Errorf("load accounts store: %w", err))
 	}
-	notifyMigrated(acctStore)
 
 	workerSpecs := engine.BuildWorkers(acctStore.Tokens(), getFinalTokenURL(*rawURL), *workers, sklclient.Options{
 		BaseUserAgent: *ua,

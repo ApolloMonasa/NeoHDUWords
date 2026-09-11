@@ -163,3 +163,88 @@ func TestFormat_Masked(t *testing.T) {
 		t.Fatal("expected plain token when plain is true")
 	}
 }
+
+func TestLoginPrimary_ReplaceSemantics(t *testing.T) {
+	s := &Store{Version: 1}
+	_, _, _ = s.Upsert("tok-a", "main", "")
+	_ = s.SetPrimaryByToken("tok-a")
+	_, _, _ = s.Upsert("tok-b", "", "")
+
+	// 1. token 已存在 → 仅切换主账号
+	alias, action, err := s.LoginPrimary("tok-b", "")
+	if err != nil || alias != "acct-2" || action != LoginSwitched {
+		t.Fatalf("switch: alias=%q action=%q err=%v", alias, action, err)
+	}
+	if s.PrimaryToken() != "tok-b" || len(s.Accounts) != 2 {
+		t.Fatalf("switch state: primary=%q accounts=%d", s.Primary, len(s.Accounts))
+	}
+
+	// 2. alias 命中 → 原地替换该账号 token
+	alias, action, err = s.LoginPrimary("tok-b-new", "acct-2")
+	if err != nil || alias != "acct-2" || action != LoginRefreshed {
+		t.Fatalf("refresh: alias=%q action=%q err=%v", alias, action, err)
+	}
+	if s.PrimaryToken() != "tok-b-new" || len(s.Accounts) != 2 {
+		t.Fatalf("refresh state: primary=%q accounts=%d", s.Primary, len(s.Accounts))
+	}
+
+	// 3. 未指定 alias → 原地替换主账号 token（不新增条目）
+	alias, action, err = s.LoginPrimary("tok-b-rotated", "")
+	if err != nil || alias != "acct-2" || action != LoginReplacedPrimary {
+		t.Fatalf("replace-primary: alias=%q action=%q err=%v", alias, action, err)
+	}
+	if s.PrimaryToken() != "tok-b-rotated" || len(s.Accounts) != 2 {
+		t.Fatalf("replace-primary state: primary=%q accounts=%d", s.Primary, len(s.Accounts))
+	}
+
+	// 4. 空库 + 新 token → 追加并设主账号
+	empty := &Store{Version: 1}
+	alias, action, err = empty.LoginPrimary("tok-x", "")
+	if err != nil || alias != "acct-1" || action != LoginAdded {
+		t.Fatalf("add: alias=%q action=%q err=%v", alias, action, err)
+	}
+	if empty.PrimaryToken() != "tok-x" {
+		t.Fatalf("add state: primary=%q", empty.Primary)
+	}
+}
+
+func TestRemoveAccount(t *testing.T) {
+	s := &Store{Version: 1}
+	_, _, _ = s.Upsert("tok-a", "a", "")
+	_, _, _ = s.Upsert("tok-b", "b", "")
+	_ = s.SetPrimaryByToken("tok-a")
+
+	name, err := s.RemoveAccount("b")
+	if err != nil || name != "b" {
+		t.Fatalf("remove member: name=%q err=%v", name, err)
+	}
+	if len(s.Accounts) != 1 || s.PrimaryToken() != "tok-a" {
+		t.Fatalf("state after member removal: %+v", s)
+	}
+
+	// 删除主账号 → 清空主账号指向
+	name, err = s.RemoveAccount("tok-a")
+	if err != nil || name != "a" {
+		t.Fatalf("remove primary: name=%q err=%v", name, err)
+	}
+	if len(s.Accounts) != 0 || s.Primary != "" || s.PrimaryToken() != "" {
+		t.Fatalf("state after primary removal: %+v", s)
+	}
+
+	if _, err := s.RemoveAccount("missing"); err == nil {
+		t.Fatal("expected error for unknown account")
+	}
+}
+
+func TestPrintAccounts(t *testing.T) {
+	s := &Store{Version: 1}
+	_, _, _ = s.Upsert("abcdefghijklmnopqrstuv", "main", "学号123")
+	_ = s.SetPrimaryByToken("abcdefghijklmnopqrstuv")
+
+	var b strings.Builder
+	s.PrintAccounts(&b, false)
+	out := b.String()
+	if !strings.Contains(out, "(primary)") || !strings.Contains(out, "main") || !strings.Contains(out, "abcdef...stuv") || !strings.Contains(out, "学号123") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}

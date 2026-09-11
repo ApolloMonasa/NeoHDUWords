@@ -151,11 +151,11 @@ func shouldUseColor() bool {
 
 func runDatabaseWizard(reader *bufio.Reader) {
 	fmt.Println("数据库菜单")
-	fmt.Println("  1. stats")
-	fmt.Println("  2. export json")
-	fmt.Println("  3. export markdown")
-	fmt.Println("  4. update")
-	fmt.Println("  5. conflicts")
+	fmt.Println("  1. 统计")
+	fmt.Println("  2. 导出 JSON")
+	fmt.Println("  3. 导出 Markdown")
+	fmt.Println("  4. 更新题库")
+	fmt.Println("  5. 答案冲突")
 	choice, _ := readLine(reader, "请选择")
 	switch strings.TrimSpace(choice) {
 	case "1":
@@ -175,9 +175,10 @@ func runDatabaseWizard(reader *bufio.Reader) {
 
 func runTokenWizard(reader *bufio.Reader) {
 	fmt.Println("账号菜单")
-	fmt.Println("  1. listtokens")
-	fmt.Println("  2. addtoken")
-	fmt.Println("  3. setprimary")
+	fmt.Println("  1. 查看账号")
+	fmt.Println("  2. 添加账号")
+	fmt.Println("  3. 设置主账号")
+	fmt.Println("  4. 删除账号")
 	choice, _ := readLine(reader, "请选择")
 	switch strings.TrimSpace(choice) {
 	case "1":
@@ -186,6 +187,8 @@ func runTokenWizard(reader *bufio.Reader) {
 		runAddTokenDirect(reader)
 	case "3":
 		runSetPrimaryDirect(reader)
+	case "4":
+		runRemoveTokenDirect(reader)
 	default:
 		fmt.Println("无效选择")
 	}

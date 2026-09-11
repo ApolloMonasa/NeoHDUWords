@@ -18,6 +18,7 @@ package tokenpool
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -44,14 +45,13 @@ type Store struct {
 	migrated bool
 }
 
-// LoadStore 读取凭证库；accounts.json 不存在时自动从旧版 .tokens/.token 迁移
-// （迁移会立刻写出新文件）。没有任何凭证时返回空库。
+// LoadStore 读取凭证库；accounts.json 不存在时返回空库（首次 login/addtoken 时才落盘）。
 func LoadStore(path string) (*Store, error) {
 	b, err := os.ReadFile(path)
 	if err == nil {
 		var s Store
 		if err := json.Unmarshal(b, &s); err != nil {
-			return nil, fmt.Errorf("解析凭证库 %s: %w", path, err)
+			return nil, fmt.Errorf("解析凭证库 %s 失败: %w（该文件损坏时可直接删除后重新 login）", path, err)
 		}
 		if s.Version == 0 {
 			s.Version = 1
@@ -62,7 +62,7 @@ func LoadStore(path string) (*Store, error) {
 	if !os.IsNotExist(err) {
 		return nil, err
 	}
-	return migrateLegacy(DefaultPoolFile, DefaultMainFile, path)
+	return &Store{Version: 1, path: path}, nil
 }
 
 // migrateLegacy 把旧版凭证迁移为统一凭证库。
@@ -178,6 +178,105 @@ func (s *Store) Tokens() []string {
 		out = append(out, a.Token)
 	}
 	return out
+}
+
+// LoginAction 描述 LoginPrimary 对凭证库做了什么，供前端输出准确提示。
+type LoginAction string
+
+const (
+	// LoginSwitched：token 已在库中，仅把主账号切过去。
+	LoginSwitched LoginAction = "switched"
+	// LoginRefreshed：alias 命中已有账号，原地替换其 token（会话轮换后的刷新）。
+	LoginRefreshed LoginAction = "refreshed"
+	// LoginReplacedPrimary：未指定 alias，原地替换主账号的 token（最常见的"重新登录"）。
+	LoginReplacedPrimary LoginAction = "replaced-primary"
+	// LoginAdded：追加了新账号并设为主账号。
+	LoginAdded LoginAction = "added"
+)
+
+// LoginPrimary 实现 login 的替换语义，返回受影响账号的别名与动作：
+//  1. token 已在库中 → 只切换主账号指向；
+//  2. alias 命中已有账号 → 原地替换该账号的 token 并设为主账号；
+//  3. 未指定 alias 且已有主账号 → 原地替换主账号的 token（重新登录同一账号）；
+//  4. 其余情况 → 追加新账号（alias 自动编号）并设为主账号。
+//
+// 想新增一个不同的账号做主账号：先 addtoken 再 setprimary。
+func (s *Store) LoginPrimary(token, alias string) (string, LoginAction, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return "", "", fmt.Errorf("empty token")
+	}
+	alias = strings.TrimSpace(alias)
+
+	// 1. token 已存在：切换主账号
+	for _, a := range s.Accounts {
+		if a.Token == token {
+			s.Primary = a.Alias
+			return a.Alias, LoginSwitched, nil
+		}
+	}
+
+	// 2. alias 命中：原地替换该账号的 token
+	if alias != "" {
+		for i, a := range s.Accounts {
+			if a.Alias == alias {
+				s.Accounts[i].Token = token
+				s.Primary = alias
+				return alias, LoginRefreshed, nil
+			}
+		}
+	}
+
+	// 3. 未指定 alias 且已有主账号：原地替换主账号的 token
+	if alias == "" && s.Primary != "" {
+		for i, a := range s.Accounts {
+			if a.Alias == s.Primary {
+				s.Accounts[i].Token = token
+				return s.Primary, LoginReplacedPrimary, nil
+			}
+		}
+	}
+
+	// 4. 追加新账号并设为主账号
+	name, _, err := s.Upsert(token, alias, "")
+	if err != nil {
+		return "", "", err
+	}
+	s.Primary = name
+	return name, LoginAdded, nil
+}
+
+// RemoveAccount 按 alias 或 token 删除账号，返回被删账号的别名。
+// 删除的是主账号时同时清空主账号指向（需要重新 login 或 setprimary）。
+func (s *Store) RemoveAccount(aliasOrToken string) (string, error) {
+	aliasOrToken = strings.TrimSpace(aliasOrToken)
+	if aliasOrToken == "" {
+		return "", fmt.Errorf("需要 --alias 或 --token")
+	}
+	for i, a := range s.Accounts {
+		if a.Alias == aliasOrToken || a.Token == aliasOrToken {
+			s.Accounts = append(s.Accounts[:i], s.Accounts[i+1:]...)
+			if s.Primary == a.Alias {
+				s.Primary = ""
+			}
+			return a.Alias, nil
+		}
+	}
+	return "", fmt.Errorf("凭证库中没有匹配 %q 的账号", Format(aliasOrToken, false))
+}
+
+// PrintAccounts 把账号列表打印到 w（含主账号标记、添加时间与打码凭证）。
+func (s *Store) PrintAccounts(w io.Writer, plain bool) {
+	for i, a := range s.Accounts {
+		role := "member "
+		if a.Alias == s.Primary {
+			role = "primary"
+		}
+		fmt.Fprintf(w, "%d. (%s) %-12s 添加于 %s  %s\n", i+1, role, a.Alias, a.AddedAt.Format("2006-01-02"), Format(a.Token, plain))
+		if a.Note != "" {
+			fmt.Fprintf(w, "   备注：%s\n", a.Note)
+		}
+	}
 }
 
 // Migrated 表示本次加载发生了旧格式自动迁移。
