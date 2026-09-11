@@ -3,6 +3,7 @@ package tokenpool
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -149,7 +150,9 @@ func TestSaveAndReload_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi.Mode().Perm() != 0o600 {
+	// Windows 不表示 POSIX 权限位（0600 落地为 0666，访问控制由 ACL 负责），
+	// 仅在 Unix 上校验文件权限。
+	if runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
 		t.Fatalf("expected 0600 perms, got %v", fi.Mode().Perm())
 	}
 }
