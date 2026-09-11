@@ -81,13 +81,12 @@ func addTokenCmd(args []string) {
 func listTokensCmd(args []string) {
 	fs := flag.NewFlagSet("listtokens", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	accountsFile := fs.String("accounts", tokenpool.DefaultAccountsFile, "accounts store file path")
 	showPlain := fs.Bool("show-plain", false, "show full token text")
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
 
-	st, err := tokenpool.LoadStore(*accountsFile)
+	st, err := tokenpool.LoadStore(tokenpool.DefaultAccountsFile)
 	if err != nil {
 		fatalf("打开凭证库失败: %v", err)
 	}
@@ -96,20 +95,19 @@ func listTokensCmd(args []string) {
 	if p := st.PrimaryToken(); p != "" {
 		primary = tokenpool.Format(p, *showPlain)
 	}
-	fmt.Printf("凭证库(%s)：共 %d 条凭证，主账号：%s\n", *accountsFile, len(st.Tokens), primary)
+	fmt.Printf("凭证库：共 %d 条凭证，主账号：%s\n", len(st.Tokens), primary)
 	st.PrintAccounts(os.Stdout, *showPlain)
 }
 
 func setPrimaryCmd(args []string) {
 	fs := flag.NewFlagSet("setprimary", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	accountsFile := fs.String("accounts", tokenpool.DefaultAccountsFile, "accounts store file path")
 	token := fs.String("token", "", "token to set as primary")
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
 
-	st, err := tokenpool.LoadStore(*accountsFile)
+	st, err := tokenpool.LoadStore(tokenpool.DefaultAccountsFile)
 	if err != nil {
 		fatalf("打开凭证库失败: %v", err)
 	}
@@ -131,7 +129,6 @@ func setPrimaryCmd(args []string) {
 func rmTokenCmd(args []string) {
 	fs := flag.NewFlagSet("rmtoken", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	accountsFile := fs.String("accounts", tokenpool.DefaultAccountsFile, "accounts store file path")
 	token := fs.String("token", "", "token of the account to remove")
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
@@ -142,7 +139,7 @@ func rmTokenCmd(args []string) {
 		fatalf("请通过 --token 指定要删除的凭证（可用 listtokens --show-plain 查看完整 token）")
 	}
 
-	st, err := tokenpool.LoadStore(*accountsFile)
+	st, err := tokenpool.LoadStore(tokenpool.DefaultAccountsFile)
 	if err != nil {
 		fatalf("打开凭证库失败: %v", err)
 	}

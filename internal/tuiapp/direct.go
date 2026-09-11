@@ -87,10 +87,9 @@ func runAddTokenDirect(reader *bufio.Reader) {
 }
 
 func runListTokensDirect(reader *bufio.Reader) {
-	accountsFile := readString(reader, "凭证库文件 [accounts.json]", tokenpool.DefaultAccountsFile)
 	showPlain := updater.PromptYesNo(reader, "是否显示完整 token 文本？", false)
 
-	st, err := tokenpool.LoadStore(accountsFile)
+	st, err := tokenpool.LoadStore(tokenpool.DefaultAccountsFile)
 	if err != nil {
 		fmt.Printf("打开凭证库失败：%v\n", err)
 		return
@@ -100,14 +99,12 @@ func runListTokensDirect(reader *bufio.Reader) {
 	if p := st.PrimaryToken(); p != "" {
 		primary = tokenpool.Format(p, showPlain)
 	}
-	fmt.Printf("凭证库(%s)：共 %d 条凭证，主账号：%s\n", accountsFile, len(st.Tokens), primary)
+	fmt.Printf("凭证库：共 %d 条凭证，主账号：%s\n", len(st.Tokens), primary)
 	st.PrintAccounts(os.Stdout, showPlain)
 }
 
 func runSetPrimaryDirect(reader *bufio.Reader) {
-	accountsFile := readString(reader, "凭证库文件 [accounts.json]", tokenpool.DefaultAccountsFile)
-
-	st, err := tokenpool.LoadStore(accountsFile)
+	st, err := tokenpool.LoadStore(tokenpool.DefaultAccountsFile)
 	if err != nil {
 		fmt.Printf("打开凭证库失败：%v\n", err)
 		return
@@ -138,9 +135,7 @@ func runSetPrimaryDirect(reader *bufio.Reader) {
 }
 
 func runRemoveTokenDirect(reader *bufio.Reader) {
-	accountsFile := readString(reader, "凭证库文件 [accounts.json]", tokenpool.DefaultAccountsFile)
-
-	st, err := tokenpool.LoadStore(accountsFile)
+	st, err := tokenpool.LoadStore(tokenpool.DefaultAccountsFile)
 	if err != nil {
 		fmt.Printf("打开凭证库失败：%v\n", err)
 		return
@@ -186,7 +181,6 @@ func runCollectDirect(reader *bufio.Reader) {
 	timeout := readDuration(reader, "超时 [15s]", 15*time.Second)
 	ua := readString(reader, "UA [默认桌面 Chrome]", sklclient.DefaultUserAgent)
 	cooldown := readDuration(reader, "冷却时间 [5m]", 5*time.Minute)
-	accountsFile := readString(reader, "凭证库文件 [accounts.json]", tokenpool.DefaultAccountsFile)
 	workers := readInt(reader, "worker 数 [0]", 0)
 	submitRetries := readInt(reader, "提交 403 重试次数 [3]", 3)
 	submitRetryInt := readDuration(reader, "提交 403 重试间隔 [10s]", 10*time.Second)
@@ -199,7 +193,7 @@ func runCollectDirect(reader *bufio.Reader) {
 	}
 	defer st.Close()
 
-	acctStore, err := tokenpool.LoadStore(accountsFile)
+	acctStore, err := tokenpool.LoadStore(tokenpool.DefaultAccountsFile)
 	if err != nil {
 		fmt.Printf("加载凭证库失败：%v\n", err)
 		return
@@ -223,7 +217,7 @@ func runCollectDirect(reader *bufio.Reader) {
 		Retry:    retryCfg,
 		Log:      collectLog,
 		OnTokenInvalid: func(token string) {
-			if err := tokenpool.RemoveTokenPersistent(accountsFile, token); err != nil {
+			if err := tokenpool.RemoveTokenPersistent(tokenpool.DefaultAccountsFile, token); err != nil {
 				collectLog("WARN", "删除失效凭证失败: %v", err)
 			}
 		},

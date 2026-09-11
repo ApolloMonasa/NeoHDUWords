@@ -67,10 +67,10 @@ func usage() {
 Usage:
 	%[1]s login    [--browser chrome|edge]
 	%[1]s addtoken [--browser chrome|edge]
-	%[1]s listtokens [--accounts accounts.json] [--show-plain]
-	%[1]s setprimary --token <token> [--accounts accounts.json]
-	%[1]s rmtoken --token <token> [--accounts accounts.json]
-	%[1]s collect [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--ua <ua>] [--cooldown 5m] [--accounts accounts.json] [--workers 0] [--submit-retries 3] [--submit-retry-interval 10s]
+	%[1]s listtokens [--show-plain]
+	%[1]s setprimary --token <token>
+	%[1]s rmtoken --token <token>
+	%[1]s collect [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--ua <ua>] [--cooldown 5m] [--workers 0] [--submit-retries 3] [--submit-retry-interval 10s]
 	%[1]s exam    [--url <token_url>] --db <path> [--rate 2] [--timeout 15s] [--time 30s] [--score 100] [--dry-run] [--submit-retries 3] [--submit-retry-interval 10s]
 	%[1]s update  [--repo owner/name] [--updates-dir .updates] [--yes] [--check-only]
 	%[1]s db stats --db <path>
@@ -113,7 +113,6 @@ Options:
 
 	Collect only:
 		--cooldown           每轮冷却时间，默认 5m
-		--accounts           凭证库文件，默认 accounts.json
 		--workers            并发 worker 数，默认自动
 
 	Update only:
@@ -293,7 +292,6 @@ func collectCmd(args []string) {
 		timeout        = fs.Duration("timeout", 15*time.Second, "http timeout")
 		ua             = fs.String("ua", sklclient.DefaultUserAgent, "user-agent")
 		cooldown       = fs.Duration("cooldown", 5*time.Minute, "cooldown between rounds")
-		accounts       = fs.String("accounts", tokenpool.DefaultAccountsFile, "accounts store file path")
 		workers        = fs.Int("workers", 0, "collect workers: 0=auto (one per stored token, or 1 when store is empty), >0=capped at n)")
 		submitRetries  = fs.Int("submit-retries", 3, "retry count for 403 on save/submit before creating new paper")
 		submitRetryInt = fs.Duration("submit-retry-interval", 10*time.Second, "wait duration between 403 retries on save/submit")
@@ -315,7 +313,7 @@ func collectCmd(args []string) {
 
 	retryCfg := engine.SubmitRetryConfig{MaxRetries: *submitRetries, Interval: *submitRetryInt}.Normalized()
 
-	acctStore, err := tokenpool.LoadStore(*accounts)
+	acctStore, err := tokenpool.LoadStore(tokenpool.DefaultAccountsFile)
 	if err != nil {
 		fatalErr(fmt.Errorf("load accounts store: %w", err))
 	}
@@ -337,7 +335,7 @@ func collectCmd(args []string) {
 		Retry:    retryCfg,
 		Log:      collectLog,
 		OnTokenInvalid: func(token string) {
-			if err := tokenpool.RemoveTokenPersistent(*accounts, token); err != nil {
+			if err := tokenpool.RemoveTokenPersistent(tokenpool.DefaultAccountsFile, token); err != nil {
 				collectLog("WARN", "删除失效凭证失败: %v", err)
 			}
 		},

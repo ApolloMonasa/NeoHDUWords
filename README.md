@@ -137,7 +137,7 @@ TUI 中对应：主菜单 `4. 数据库`。
 ### 收集
 
 ```bash
-./cli collect [--db mywords.db] [--cooldown 5m] [--workers 0] [--accounts accounts.json]
+./cli collect [--db mywords.db] [--cooldown 5m] [--workers 0]
 ```
 
 - 题库里有答案的题照常作答，没见过的题空着提交；交卷后把**官方正确答案**回写进数据库，所以每刷一轮题库就变厚一点
