@@ -53,7 +53,8 @@ func Run(ctx context.Context, opts Options) (installed bool, err error) {
 		return false, nil
 	}
 
-	if !opts.AutoYes && !PromptYesNo(opts.Reader, "检测到更新，是否下载？", false) {
+	// 单次确认：同意后自动完成下载 → 校验 → 安装（--yes 跳过询问）
+	if !opts.AutoYes && !PromptYesNo(opts.Reader, "检测到更新，是否下载并安装？", false) {
 		fmt.Println("已取消更新")
 		return false, nil
 	}
@@ -98,10 +99,6 @@ func Run(ctx context.Context, opts Options) (installed bool, err error) {
 		fmt.Println("更新包完整性校验通过")
 	}
 
-	if !opts.AutoYes && !PromptYesNo(opts.Reader, "是否立即安装更新？", true) {
-		fmt.Println("已取消安装（更新包保留在 " + dest + "）")
-		return false, nil
-	}
 	if err := InstallSelfUpdate(dest); err != nil {
 		return false, err
 	}

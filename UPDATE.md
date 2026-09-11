@@ -129,7 +129,7 @@ Release 流程由推 `v*` 标签触发，先跑 `go test ./...` 作为发布门�
 ```
 检查版本（20s 超时）→ 打印状态
   → 无更新：结束
-  → 确认下载？（--yes / TUI 交互跳过）
+  → 确认下载并安装？（--yes 跳过询问）
   → 下载资产 → SHA256 校验
   → 确认安装？
   → InstallSelfUpdate → 原进程退出
@@ -158,7 +158,7 @@ GitHub Actions (release.yml)
     （版本模式: Version vs tag_name；开发模式: git HEAD vs 远端 HEAD）
            │
            ▼ (Available = true)
-    updater.Run()：确认 → 下载 → SHA256 校验 → 确认
+    updater.Run()：确认 → 下载 → SHA256 校验
            │
            ▼
     InstallSelfUpdate() → 临时副本 apply-update → 替换自身
