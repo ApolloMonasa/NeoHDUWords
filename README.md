@@ -56,7 +56,7 @@
 
 小提示：
 
-- 过程中所有提问（数据库路径、速率等）**直接回车就是默认值**，不确定就一路回车。
+- 只问必要项（数据库路径等），**直接回车就是默认值**；速率/超时/重试等高级选项默认折叠，需要时再展开调整。
 - 收集是无限循环，想停按 **Ctrl+C**（TUI 中会自动回到主菜单）。
 - TUI 每次启动会自动检查更新，有新版本会询问你是否下载安装。
 
@@ -127,12 +127,12 @@ TUI 中对应：主菜单 `4. 数据库`。
 ### 登录
 
 ```bash
-./cli login [--browser chrome|edge] [--alias <别名>]
-./cli addtoken [--browser chrome|edge] [--alias <别名>]
+./cli login [--browser chrome|edge]
+./cli addtoken [--browser chrome|edge]
 ```
 
 - `--browser`：留空自动检测（优先 Chrome，其次 Edge），一般不用填
-- `--alias`：给账号起个别名（如学号），方便在 `listtokens` 里认出来；不填自动编号
+- 再次 `login` 会刷新主账号凭证（会话过期后重新登录即可）；`addtoken` 追加的凭证用于多账号并发收集
 
 ### 收集
 
@@ -224,6 +224,7 @@ go test ./...
 | `internal/tokenpool/` | 凭证库 accounts.json 读写 |
 | `internal/tuiapp/` | TUI 菜单与交互提示 |
 | `internal/updater/` | 自更新交互流程（CLI 与 TUI 共用） |
+| `internal/ui/` | 共用终端输出：日志行与 y/n 确认对话 |
 | `internal/browser/` | Chrome/Edge 自动检测与登录凭证捕获 |
 | `internal/sklclient/` | 平台 API 客户端 |
 | `internal/store/` | SQLite 题库存储（含 schema 迁移） |

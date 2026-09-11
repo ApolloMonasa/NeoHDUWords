@@ -177,15 +177,24 @@ func runCollectDirect(reader *bufio.Reader) {
 	defer cancel()
 
 	dbPath := readString(reader, "数据库路径 [hduwords.db]", "hduwords.db")
-	rate := readFloat(reader, "请求速率 [2]", 2)
-	timeout := readDuration(reader, "超时 [15s]", 15*time.Second)
-	ua := readString(reader, "UA [默认桌面 Chrome]", sklclient.DefaultUserAgent)
-	cooldown := readDuration(reader, "冷却时间 [5m]", 5*time.Minute)
-	workers := readInt(reader, "worker 数 [0]", 0)
-	submitRetries := readInt(reader, "提交 403 重试次数 [3]", 3)
-	submitRetryInt := readDuration(reader, "提交 403 重试间隔 [10s]", 10*time.Second)
 
-	retryCfg := engine.SubmitRetryConfig{MaxRetries: submitRetries, Interval: submitRetryInt}.Normalized()
+	// 高级选项默认折叠：一路回车即可用默认值开跑
+	rate := 2.0
+	timeout := 15 * time.Second
+	ua := sklclient.DefaultUserAgent
+	cooldown := 5 * time.Minute
+	workers := 0
+	retryCfg := engine.SubmitRetryConfig{MaxRetries: 3, Interval: 10 * time.Second}.Normalized()
+	if ui.PromptYesNo(reader, "是否调整高级选项（速率/超时/冷却/并发等）？", false) {
+		rate = readFloat(reader, "请求速率 [2]", 2)
+		timeout = readDuration(reader, "超时 [15s]", 15*time.Second)
+		ua = readString(reader, "UA [默认桌面 Chrome]", sklclient.DefaultUserAgent)
+		cooldown = readDuration(reader, "冷却时间 [5m]", 5*time.Minute)
+		workers = readInt(reader, "worker 数 [0]", 0)
+		submitRetries := readInt(reader, "提交 403 重试次数 [3]", 3)
+		submitRetryInt := readDuration(reader, "提交 403 重试间隔 [10s]", 10*time.Second)
+		retryCfg = engine.SubmitRetryConfig{MaxRetries: submitRetries, Interval: submitRetryInt}.Normalized()
+	}
 	st, err := store.Open(dbPath)
 	if err != nil {
 		fmt.Printf("打开数据库失败：%v\n", err)
@@ -230,11 +239,18 @@ func runExamDirect(reader *bufio.Reader) {
 	waitBeforeSubmit := readDuration(reader, "交卷前等待时长 [30s]", 30*time.Second)
 	score := readInt(reader, "目标得分百分比 [-1]", -1)
 	dryRun := ui.PromptYesNo(reader, "是否 dry-run？", false)
-	rate := readFloat(reader, "请求速率 [2]", 2)
-	timeout := readDuration(reader, "超时 [15s]", 15*time.Second)
-	submitRetries := readInt(reader, "提交 403 重试次数 [3]", 3)
-	submitRetryInt := readDuration(reader, "提交 403 重试间隔 [10s]", 10*time.Second)
-	retryCfg := engine.SubmitRetryConfig{MaxRetries: submitRetries, Interval: submitRetryInt}.Normalized()
+
+	// 高级选项默认折叠：一路回车即可用默认值开考
+	rate := 2.0
+	timeout := 15 * time.Second
+	retryCfg := engine.SubmitRetryConfig{MaxRetries: 3, Interval: 10 * time.Second}.Normalized()
+	if ui.PromptYesNo(reader, "是否调整高级选项（速率/超时/重试等）？", false) {
+		rate = readFloat(reader, "请求速率 [2]", 2)
+		timeout = readDuration(reader, "超时 [15s]", 15*time.Second)
+		submitRetries := readInt(reader, "提交 403 重试次数 [3]", 3)
+		submitRetryInt := readDuration(reader, "提交 403 重试间隔 [10s]", 10*time.Second)
+		retryCfg = engine.SubmitRetryConfig{MaxRetries: submitRetries, Interval: submitRetryInt}.Normalized()
+	}
 
 	// Ctrl+C 可中断等待与请求
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
