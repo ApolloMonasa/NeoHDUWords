@@ -168,10 +168,10 @@ func localHead(startDir string) (sha string, branch string, err error) {
 	head := strings.TrimSpace(string(b))
 	if strings.HasPrefix(head, "ref:") {
 		ref := strings.TrimSpace(strings.TrimPrefix(head, "ref:"))
-		branch = filepath.Base(ref)
+		// readRef 自己会从 ref 推导 branch
 		return readRef(gitDir, ref)
 	}
-	return head, branch, nil
+	return head, "", nil
 }
 
 func findGitDir(startDir string) (string, string, error) {
