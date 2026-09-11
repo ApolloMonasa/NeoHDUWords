@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -181,7 +180,6 @@ func runCollectDirect(reader *bufio.Reader) {
 	defer cancel()
 
 	dbPath := readString(reader, "数据库路径 [hduwords.db]", "hduwords.db")
-	tokenURL := promptTokenURL(reader)
 	rate := readFloat(reader, "请求速率 [2]", 2)
 	timeout := readDuration(reader, "超时 [15s]", 15*time.Second)
 	ua := readString(reader, "UA [默认桌面 Chrome]", sklclient.DefaultUserAgent)
@@ -205,7 +203,7 @@ func runCollectDirect(reader *bufio.Reader) {
 		return
 	}
 
-	specs := engine.BuildWorkers(acctStore.Tokens(), resolveURLForTUI(tokenURL), workers, sklclient.Options{
+	specs := engine.BuildWorkers(acctStore.Tokens(), resolvePrimaryURL(), workers, sklclient.Options{
 		BaseUserAgent: ua,
 		Timeout:       timeout,
 		MaxRPS:        rate,
@@ -228,7 +226,6 @@ func runCollectDirect(reader *bufio.Reader) {
 
 func runExamDirect(reader *bufio.Reader) {
 	dbPath := readString(reader, "数据库路径 [hduwords.db]", "hduwords.db")
-	tokenURL := promptTokenURL(reader)
 	waitBeforeSubmit := readDuration(reader, "交卷前等待时长 [30s]", 30*time.Second)
 	score := readInt(reader, "目标得分百分比 [-1]", -1)
 	dryRun := updater.PromptYesNo(reader, "是否 dry-run？", false)
@@ -238,6 +235,10 @@ func runExamDirect(reader *bufio.Reader) {
 	submitRetryInt := readDuration(reader, "提交 403 重试间隔 [10s]", 10*time.Second)
 	retryCfg := engine.SubmitRetryConfig{MaxRetries: submitRetries, Interval: submitRetryInt}.Normalized()
 
+	// Ctrl+C 可中断等待与请求
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	st, err := store.Open(dbPath)
 	if err != nil {
 		fmt.Printf("打开数据库失败：%v\n", err)
@@ -245,7 +246,7 @@ func runExamDirect(reader *bufio.Reader) {
 	}
 	defer st.Close()
 
-	finalURL := resolveURLForTUI(tokenURL)
+	finalURL := resolvePrimaryURL()
 	if finalURL == "" {
 		fmt.Println("凭证库中没有主账号，请先登录（主菜单 1）")
 		return
@@ -256,7 +257,7 @@ func runExamDirect(reader *bufio.Reader) {
 		return
 	}
 
-	if err := engine.RunExam(context.Background(), engine.ExamOptions{
+	if err := engine.RunExam(ctx, engine.ExamOptions{
 		Client:           cl,
 		Store:            st,
 		WaitBeforeSubmit: waitBeforeSubmit,
@@ -366,26 +367,13 @@ func runDBUpdateDirect() {
 	os.Remove(dest + "-shm")
 }
 
-func promptTokenURL(reader *bufio.Reader) string {
-	tokenURL, _ := readLine(reader, "token URL（留空则使用凭证库主账号）")
-	return strings.TrimSpace(tokenURL)
-}
-
-// primaryTokenTUI 返回凭证库主账号 token；无凭证库或无主账号时返回空串。
-func primaryTokenTUI() string {
+// resolvePrimaryURL 返回凭证库主账号的平台入口 URL；无主账号时返回空串。
+func resolvePrimaryURL() string {
 	st, err := tokenpool.LoadStore(tokenpool.DefaultAccountsFile)
 	if err != nil {
 		return ""
 	}
-	return st.PrimaryToken()
-}
-
-func resolveURLForTUI(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw != "" {
-		return raw
-	}
-	if token := primaryTokenTUI(); token != "" {
+	if token := st.PrimaryToken(); token != "" {
 		return sklclient.TokenURL(token)
 	}
 	return ""

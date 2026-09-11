@@ -108,11 +108,10 @@ func runCollectLoop(ctx context.Context, workerTag string, cl *sklclient.Client,
 			var apiErr *sklclient.APIError
 			waitTime := cooldown
 			errText := err.Error()
+			// 限频特征：结构化 code=2，或报错文案带"上次申请时间/短时间重试"
 			shouldDynamicCooldown := strings.Contains(errText, "上次申请时间") || strings.Contains(errText, "短时间重试")
-			if errors.As(err, &apiErr) {
-				if apiErr.Code == 2 || strings.Contains(apiErr.Msg, "短时间重试") || strings.Contains(apiErr.Msg, "失败") {
-					shouldDynamicCooldown = true
-				}
+			if errors.As(err, &apiErr) && apiErr.Code == 2 {
+				shouldDynamicCooldown = true
 			}
 			if shouldDynamicCooldown {
 				waitTime = calcDynamicCooldown(errText, cooldown)

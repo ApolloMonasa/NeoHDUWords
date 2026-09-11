@@ -21,6 +21,7 @@ func Run(args []string) error {
 	fs.SetOutput(os.Stderr)
 	repoFlag := fs.String("repo", updatecheck.DefaultRepo, "github repo owner/name")
 	updatesDirFlag := fs.String("updates-dir", ".updates", "download directory for update archives")
+	noUpdateCheck := fs.Bool("no-update-check", false, "skip startup update check")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -34,16 +35,18 @@ func Run(args []string) error {
 	printSplash(repo)
 	reader := bufio.NewReader(os.Stdin)
 
-	installed, err := updater.Run(context.Background(), updater.Options{
-		Repo:       repo,
-		BinaryName: "tui",
-		UpdatesDir: *updatesDirFlag,
-		Reader:     reader,
-	})
-	if err != nil {
-		fmt.Printf("\n更新检查失败：%v\n", err)
-	} else if installed {
-		return nil
+	if !*noUpdateCheck {
+		installed, err := updater.Run(context.Background(), updater.Options{
+			Repo:       repo,
+			BinaryName: "tui",
+			UpdatesDir: *updatesDirFlag,
+			Reader:     reader,
+		})
+		if err != nil {
+			fmt.Printf("\n自动更新出错（忽略并进入主菜单）：%v\n", err)
+		} else if installed {
+			return nil
+		}
 	}
 
 	menuLoop(reader)

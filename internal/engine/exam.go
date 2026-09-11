@@ -28,7 +28,16 @@ type ExamOptions struct {
 
 // RunExam 执行一次完整的正式考试：建卷 → 答题 →（等待）→ 保存 → 交卷 → 回收官方答案。
 // 内部对整体流程施加 max(WaitBeforeSubmit+15m, 20m) 的超时。
+// 任何阶段检测到凭证失效都会返回带"请重新 login"提示的错误。
 func RunExam(ctx context.Context, opts ExamOptions) error {
+	err := runExamInner(ctx, opts)
+	if sklclient.IsAuthError(err) {
+		return fmt.Errorf("登录凭证可能已失效，请重新 login 后再考试: %w", err)
+	}
+	return err
+}
+
+func runExamInner(ctx context.Context, opts ExamOptions) error {
 	log := opts.Log
 	retryCfg := opts.Retry.Normalized()
 

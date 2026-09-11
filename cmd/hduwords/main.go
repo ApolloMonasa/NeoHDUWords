@@ -199,6 +199,10 @@ func runExamCmd(args []string) {
 		engine.PaperTypeExam, *dbPath, *dryRun, retryCfg.MaxRetries, retryCfg.Interval)
 	collectLog("INFO", "exam 参数: time=%v score=%d", *examTime, *examScore)
 
+	// Ctrl+C 可中断等待与请求
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	st, err := store.Open(*dbPath)
 	if err != nil {
 		fatalErr(err)
@@ -214,7 +218,7 @@ func runExamCmd(args []string) {
 		fatalErr(err)
 	}
 
-	if err := engine.RunExam(context.Background(), engine.ExamOptions{
+	if err := engine.RunExam(ctx, engine.ExamOptions{
 		Client:           cl,
 		Store:            st,
 		WaitBeforeSubmit: *examTime,

@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -119,5 +121,31 @@ func TestOpenIsIdempotent(t *testing.T) {
 	}
 	if s.Items != 1 || s.Answers != 1 {
 		t.Fatalf("expected single row after reopen, got %+v", s)
+	}
+}
+
+func TestCloseLeavesNoWALFiles(t *testing.T) {
+	dir := t.TempDir()
+	db := filepath.Join(dir, "clean.db")
+
+	st, err := Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.UpsertAnswer(context.Background(), "s", []string{"a", "b", "c", "d"}, "a", "t"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), "-wal") || strings.HasSuffix(e.Name(), "-shm") {
+			t.Fatalf("stale WAL file remains after Close: %s", e.Name())
+		}
 	}
 }

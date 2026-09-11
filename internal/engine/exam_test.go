@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -287,5 +288,39 @@ func TestRunExam_TargetScoreWithInsufficientAnswers(t *testing.T) {
 	}
 	if right != 1 {
 		t.Fatalf("expected exactly 1 correct (only known answer), got %d", right)
+	}
+}
+
+func TestRunExam_AuthErrorHint(t *testing.T) {
+	st := openTestStore(t)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/paper/list", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]sklclient.PaperSummary{})
+	})
+	mux.HandleFunc("/api/paper/new", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 1, "msg": "token已失效，请重新登录"})
+	})
+	mux.HandleFunc("/api/paper/detail", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(sklclient.PaperDetail{})
+	})
+	mux.HandleFunc("/api/paper/save", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	cl, err := sklclient.NewFromTokenURL(srv.URL+"/?token=t", sklclient.Options{MaxRPS: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = RunExam(context.Background(), ExamOptions{
+		Client: cl,
+		Store:  st,
+		Retry:  SubmitRetryConfig{MaxRetries: 1, Interval: time.Millisecond}.Normalized(),
+		Log:    testLogger(t),
+	})
+	if err == nil || !strings.Contains(err.Error(), "请重新 login") {
+		t.Fatalf("expected auth hint error, got %v", err)
 	}
 }
