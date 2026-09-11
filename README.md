@@ -100,9 +100,10 @@
 ./cli listtokens                   # 查看账号列表、别名与主账号标识
 ./cli listtokens --show-plain      # 显示完整凭证文本（默认打码）
 ./cli setprimary --token <token>   # 换一个主账号
+./cli rmtoken --alias 学号         # 删除一个账号（清理失效凭证）
 ```
 
-> 从旧版本升级？第一次运行任何命令时会自动把 `.token`/`.tokens` 迁移进 `accounts.json`（旧文件原样保留，确认无误后可手动删除）。
+> 从旧版本升级？凭证不做自动迁移——重新 `login` 一次即可（旧的 `.token`/`.tokens` 文件可以删掉）。
 >
 > 安全提示：凭证以明文保存在 `accounts.json`（权限 0600，仅本用户可读），请不要把它分享给别人或提交到代码仓库。
 
@@ -221,7 +222,7 @@ go test ./...
 | `cmd/hduwords/` | CLI 入口：参数解析与命令分发 |
 | `cmd/tui/` | TUI 入口（兼作自更新安装助手） |
 | `internal/engine/` | collect/exam 核心业务流程（CLI 与 TUI 共用） |
-| `internal/tokenpool/` | 凭证库 accounts.json 读写与旧格式迁移 |
+| `internal/tokenpool/` | 凭证库 accounts.json 读写 |
 | `internal/tuiapp/` | TUI 菜单与交互提示 |
 | `internal/updater/` | 自更新交互流程（CLI 与 TUI 共用） |
 | `internal/browser/` | Chrome/Edge 自动检测与登录凭证捕获 |

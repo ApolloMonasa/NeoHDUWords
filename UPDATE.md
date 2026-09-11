@@ -112,16 +112,13 @@ Release 流程由推 `v*` 标签触发，先跑 `go test ./...` 作为发布门�
 1. os.Executable()  → 拿到自己的路径，比如 /usr/local/bin/cli
 2. os.MkdirTemp()   → 创建临时目录，比如 /tmp/hduwords-updater-xxxx/
 3. 把自己拷贝到临时目录 → /tmp/hduwords-updater-xxxx/cli
-4. exec.Command(临时副本, ...ApplyArgs) 启动安装助手
+4. exec.Command(临时副本, "apply-update", "--source", <新文件>, "--target", <原文件>) 启动安装助手
 5. 原进程返回并退出
 ```
 
-安装助手参数由入口注入（`Options.ApplyArgs`），因为两入口 flag 风格不同：
-
-| 入口 | 助手参数 | 处理位置 |
-|------|----------|----------|
-| CLI | `apply-update --source <新文件> --target <原文件>` | `cmd/hduwords` 的 `apply-update` 子命令 |
-| TUI | `--apply-update --source <新文件> --target <原文件>` | `cmd/tui` 的同名开关 |
+安装助手协议在 CLI 与 TUI 间统一：`apply-update --source <新文件> --target <原文件>` 子命令
+（分别由 `cmd/hduwords` 与 `cmd/tui` 处理）。自更新时执行助手的是当前进程的临时副本，
+协议只会"新配新"，因此调整协议不影响线上旧版本。
 
 **Windows 特殊处理**（`internal/updatecheck/install.go` 的 `installBinaryWindows`）：exe 被运行时无法直接覆盖，最多重试 20 次（每 250ms）删除旧文件后再拷贝新文件。POSIX 直接"写临时文件 + rename"原子替换。
 
